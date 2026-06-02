@@ -6,6 +6,10 @@ import { preflightHeaders } from "./lib/cors";
 import { runRetention } from "./db/retention";
 import { recomputeYesterday } from "./db/aggregate";
 import { checkCapacity } from "./lib/capacity";
+import { exportPreviousMonth, exportMonth } from "./db/exporter";
+import { getAppConfig } from "./lib/config";
+import { checkMetricsAuth } from "./lib/auth";
+import { DASHBOARD_HTML } from "./dashboard";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -22,6 +26,29 @@ app.post("/errors", (c) => collect(c, "error"));
 
 // メトリクス（§9.4）
 app.get("/metrics", (c) => getMetrics(c));
+
+// §20.1 手動 export（管理API。token 認証。Phase 4 自動化までの補助 / 再実行用）
+app.post("/admin/export", async (c) => {
+  const appId = c.req.query("app_id");
+  if (!appId || !getAppConfig(c.env, appId)) return c.json({ error: "invalid_app" }, 403);
+  if (!checkMetricsAuth(c.env, appId, c.req.header("Authorization") ?? null)) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+  if (!c.env.EXPORTS) return c.json({ error: "export_not_configured" }, 501);
+  const year = Number(c.req.query("year"));
+  const month = Number(c.req.query("month"));
+  if (!Number.isInteger(year) || !(month >= 1 && month <= 12)) {
+    return c.json({ error: "year_month_required" }, 400);
+  }
+  const includeRaw = c.req.query("include_raw") === "true";
+  const result = await exportMonth(c.env, appId, year, month, { includeRaw });
+  return c.json({ ok: true, ...result });
+});
+
+// §18.1 最小ダッシュボード（読み取り専用・同一オリジンで /metrics を叩く）
+app.get("/dashboard", (c) =>
+  c.html(DASHBOARD_HTML, 200, { "Cache-Control": "no-store", "X-Robots-Tag": "noindex" })
+);
 
 app.get("/health", (c) => c.json({ ok: true }));
 
@@ -54,7 +81,8 @@ export default {
       case "0 * * * *": // 毎時: 容量チェック / 逼迫アラート
         ctx.waitUntil(checkCapacity(env, configs, nowIso));
         break;
-      case "0 4 1 * *": // 月次: R2 export（Phase 4 で実装）
+      case "0 4 1 * *": // 月次: 前月分を R2 export（§20）
+        ctx.waitUntil(exportPreviousMonth(env, Object.keys(configs), nowMs));
         break;
     }
   },

@@ -15,6 +15,11 @@ migrations_dir = "migrations"
 binding = "RL"
 id = "REPLACE_WITH_KV_ID"
 
+# --- R2: 月次 export（§20, Phase 4） ---
+[[r2_buckets]]
+binding = "EXPORTS"
+bucket_name = "frontping-exports"
+
 # --- Cron Triggers（§19.4 定期処理一覧） ---
 # 0 3 * * *  日次: retention + daily_session_metrics 再計算
 # 0 * * * *  毎時: 容量チェック / 逼迫アラート

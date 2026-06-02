@@ -1,0 +1,38 @@
+name: sdk test
+
+on:
+  push:
+    paths:
+      - "sdk/**"
+      - ".github/workflows/sdk-test.yml"
+  pull_request:
+    paths:
+      - "sdk/**"
+      - ".github/workflows/sdk-test.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: sdk/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build

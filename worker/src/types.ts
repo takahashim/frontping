@@ -3,6 +3,7 @@
 export interface Env {
   DB: D1Database;
   RL: KVNamespace;
+  EXPORTS?: R2Bucket; // §20 月次 export 先（未設定なら export 無効）
   // vars
   APP_CONFIG: string; // JSON: Record<app_id, AppConfig>
   // secrets
