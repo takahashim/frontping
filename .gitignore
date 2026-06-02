@@ -1,0 +1,40 @@
+# --- Dependencies ---
+node_modules/
+
+# --- Cloudflare / Wrangler ---
+.wrangler/
+.dev.vars
+.dev.vars.*
+wrangler.toml.bak
+# ローカル D1 / KV / R2 などのエミュレータ状態
+.mf/
+dist/
+build/
+
+# --- Logs ---
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- TypeScript / build artifacts ---
+*.tsbuildinfo
+coverage/
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+
+# --- Editor / backup files ---
+*~
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# --- OS files ---
+.DS_Store
+.DS_Store?
+Thumbs.db

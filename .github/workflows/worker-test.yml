@@ -1,0 +1,35 @@
+name: worker test
+
+on:
+  push:
+    paths:
+      - "worker/**"
+      - ".github/workflows/worker-test.yml"
+  pull_request:
+    paths:
+      - "worker/**"
+      - ".github/workflows/worker-test.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: worker/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Run tests
+        run: npm test

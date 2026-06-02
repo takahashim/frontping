@@ -1,0 +1,45 @@
+name = "frontping"
+main = "src/index.ts"
+compatibility_date = "2026-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+# --- D1 (raw_events / session_summaries / daily_* / error_events / dedupes) ---
+[[d1_databases]]
+binding = "DB"
+database_name = "frontping"
+database_id = "REPLACE_WITH_D1_ID"
+migrations_dir = "migrations"
+
+# --- KV: 概算カウンタ（§16.2 総量上限 / rate limit） ---
+[[kv_namespaces]]
+binding = "RL"
+id = "REPLACE_WITH_KV_ID"
+
+# --- Cron Triggers（§19.4 定期処理一覧） ---
+# 0 3 * * *  日次: retention + daily_session_metrics 再計算
+# 0 * * * *  毎時: 容量チェック / 逼迫アラート
+# 0 4 1 * *  月次: R2 export (Phase 4)
+[triggers]
+crons = ["0 3 * * *", "0 * * * *", "0 4 1 * *"]
+
+# --- 静的 app 設定（§24）。秘匿値は secret に分離して持つ ---
+#   secrets（`wrangler secret put` で投入）:
+#     METRICS_TOKENS    : {"app_id":"token", ...}  (§9.4)
+#     NOTIFY_WEBHOOK_URL : Slack/Discord webhook   (§13.4)
+[vars]
+APP_CONFIG = '''
+{
+  "product_recommender": {
+    "allowed_origins": ["https://example.com", "https://www.example.com"],
+    "require_origin": true,
+    "limits": {
+      "events_per_minute": 600,
+      "events_per_day": 200000,
+      "raw_events_rows": 1000000,
+      "warn_threshold_ratio": 0.8
+    },
+    "retention": { "raw_events_days": 30, "error_events_days": 90, "session_summaries_days": 365 },
+    "notification": { "enabled": true, "dedupe_minutes": 10, "capacity_dedupe_minutes": 60 }
+  }
+}
+'''
