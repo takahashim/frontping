@@ -8,16 +8,16 @@
 
 ```bash
 cd worker
-npm install
-npx wrangler login        # ブラウザでログイン
+pnpm install
+pnpm exec wrangler login        # ブラウザでログイン
 ```
 
 ## 1. リソースを作成して ID を控える
 
 ```bash
-npx wrangler d1 create frontping            # → database_id を控える
-npx wrangler kv namespace create RL         # → id を控える
-npx wrangler r2 bucket create frontping-exports
+pnpm exec wrangler d1 create frontping            # → database_id を控える
+pnpm exec wrangler kv namespace create RL         # → id を控える
+pnpm exec wrangler r2 bucket create frontping-exports
 ```
 
 ## 2. wrangler.toml のプレースホルダを差し替える
@@ -32,26 +32,26 @@ npx wrangler r2 bucket create frontping-exports
 ## 3. マイグレーションを本番 D1 に適用
 
 ```bash
-npx wrangler d1 migrations apply frontping --remote
+pnpm exec wrangler d1 migrations apply frontping --remote
 ```
 
 ## 4. secret を投入（§9.4 / §13.4 / §14.3）
 
 ```bash
 # 管理API / dashboard 用トークン（app_id ごと）
-echo '{"product_recommender":"<長いランダム文字列>"}' | npx wrangler secret put METRICS_TOKENS
+echo '{"product_recommender":"<長いランダム文字列>"}' | pnpm exec wrangler secret put METRICS_TOKENS
 
 # エラー/容量通知の webhook（任意。未設定なら通知は no-op）
-npx wrangler secret put NOTIFY_WEBHOOK_URL
+pnpm exec wrangler secret put NOTIFY_WEBHOOK_URL
 
 # IP ハッシュ用の salt（任意。設定時のみ ip_hash を保存）
-npx wrangler secret put IP_HASH_SECRET
+pnpm exec wrangler secret put IP_HASH_SECRET
 ```
 
 ## 5. デプロイ
 
 ```bash
-npx wrangler deploy
+pnpm exec wrangler deploy
 ```
 
 Cron Triggers（日次/毎時/月次）は `wrangler.toml` の `[triggers]` から自動登録される。

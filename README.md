@@ -20,10 +20,10 @@ sdk/           フロントエンド SDK（依存ゼロ・TypeScript）
 
 ```bash
 cd worker
-npm install
-npm test                                   # 27 tests
-npx wrangler d1 migrations apply frontping --local
-npx wrangler dev                           # ローカル起動
+pnpm install
+pnpm test                                  # 27 tests
+pnpm exec wrangler d1 migrations apply frontping --local
+pnpm exec wrangler dev                     # ローカル起動
 ```
 
 デプロイは [worker/DEPLOY.md](./worker/DEPLOY.md)。
@@ -32,8 +32,8 @@ npx wrangler dev                           # ローカル起動
 
 ```bash
 cd sdk
-npm install && npm test                    # 11 tests
-npm run build                              # dist/ に出力
+pnpm install && pnpm test                  # 11 tests
+pnpm run build                             # dist/ に出力
 ```
 
 使い方:

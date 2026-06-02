@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Lightweight analytics & error SDK for frontping",
   "type": "module",
+  "packageManager": "pnpm@10.28.2",
   "main": "dist/index.js",
   "module": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,5 +16,8 @@
   "devDependencies": {
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild"]
   }
 }

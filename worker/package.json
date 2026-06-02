@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@10.28.2",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
@@ -20,5 +21,8 @@
     "typescript": "^5.6.0",
     "vitest": "^2.1.0",
     "wrangler": "^4.0.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["esbuild", "workerd", "sharp"]
   }
 }
