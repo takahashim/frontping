@@ -1,42 +1,44 @@
 # frontping
 
-小規模フロントエンド向けの軽量 analytics / error 通知基盤（Cloudflare Workers + D1）。
-仕様は [spec.md](./docs/spec.md) を参照。
+English | [日本語](./README.ja.md)
 
-## 構成
+A lightweight analytics / error notification backend for small frontends (Cloudflare Workers + D1).
+See the specification in [docs/spec.md](./docs/spec.md).
+
+## Layout
 
 ```
-docs/spec.md   仕様書（ポリシー・データモデル・API・運用方針）
-worker/        収集 Worker（Hono + D1 + KV + R2）
-sdk/           フロントエンド SDK（依存ゼロ・TypeScript）
+docs/spec.md   Specification (policy, data model, API, operations)
+worker/        Collection Worker (Hono + D1 + KV + R2)
+sdk/           Frontend SDK (zero-dependency, TypeScript)
 ```
 
 ## Worker
 
-- エンドポイント: `POST /events` `/events/batch` `/errors`, `GET /metrics`, `GET /dashboard`, `POST /admin/export`
-- 1リクエスト=1トランザクションで raw_events / daily_event_counts / session_summaries を書き込み（§25.7）
-- 総量上限超過は fetch=429+Retry-After / beacon=静かにドロップ（§16）
-- Cron: 日次 retention + セッション集計、毎時 容量チェック、月次 R2 export（§19.4）
+- Endpoints: `POST /events` `/events/batch` `/errors`, `GET /metrics`, `GET /dashboard`, `POST /admin/export`
+- One request = one transaction, writing raw_events / daily_event_counts / session_summaries (§25.7)
+- On exceeding volume limits: fetch → 429 + Retry-After, beacon → silently dropped (§16)
+- Cron: daily retention + session aggregation, hourly capacity checks, monthly R2 export (§19.4)
 
 ```bash
 cd worker
 pnpm install
 pnpm test                                  # 27 tests
 pnpm exec wrangler d1 migrations apply frontping --local
-pnpm exec wrangler dev                     # ローカル起動
+pnpm exec wrangler dev                     # run locally
 ```
 
-デプロイは [worker/DEPLOY.md](./worker/DEPLOY.md)。
+For deployment, see [worker/DEPLOY.md](./worker/DEPLOY.md).
 
 ## SDK
 
 ```bash
 cd sdk
 pnpm install && pnpm test                  # 11 tests
-pnpm run build                             # dist/ に出力
+pnpm run build                             # outputs to dist/
 ```
 
-使い方:
+Usage:
 
 ```ts
 import { createAnalytics } from "@frontping/sdk";
@@ -51,7 +53,7 @@ const analytics = createAnalytics({
 analytics.trackPageView();
 analytics.trackClick("start_button");
 
-// ウィジェットフロー（型付きラッパー）
+// Widget flow (typed wrappers)
 analytics.widgetOpened();
 analytics.flowStarted();
 analytics.stepViewed({ step: 1 });
@@ -59,18 +61,18 @@ analytics.choiceSelected({ step: 1, choiceId: "budget_low" });
 analytics.recommendationShown({ resultId: "plan_basic", stepCount: 4, elapsedMs: 8200 });
 analytics.recommendationAccepted({ resultId: "plan_basic" });
 
-// エラー（即時送信）
+// Errors (sent immediately)
 window.addEventListener("error", (e) => {
   analytics.trackError(e.message, { stack: e.error?.stack, source: e.filename });
 });
 ```
 
-- session_id はタブ単位で自動生成（§17.2）
-- イベントは5秒間隔／20件でバッチ送信、離脱時は sendBeacon（§17.4/§17.5）
-- 429 を受けたら Retry-After の間は送信停止しイベントを破棄（リトライしない, §17.6）
-- 送信失敗はユーザーに見せない（§22.1）
+- `session_id` is generated automatically per tab (§17.2)
+- Events are batched (every 5s / 20 events) and flushed via sendBeacon on page exit (§17.4 / §17.5)
+- On a 429, sending pauses for the Retry-After window and events are dropped (no retry, §17.6)
+- Send failures are never surfaced to the user (§22.1)
 
-## ダッシュボード
+## Dashboard
 
-`GET /dashboard` を開き、app_id と metrics token を入力すると主要指標を表示（§18.1）。
-読み取り専用・同一オリジンで `/metrics` を呼ぶ。
+Open `GET /dashboard`, enter an app_id and metrics token to view the key metrics (§18.1).
+It is read-only and calls `/metrics` from the same origin.

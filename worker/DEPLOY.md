@@ -1,107 +1,109 @@
-# frontping Worker デプロイ手順
+# frontping Worker — Deployment
 
-本番（Cloudflare）への初回デプロイ手順。すべて `worker/` ディレクトリで実行する。
-リソース作成・secret 投入はあなたのアカウント認証が必要なため、各コマンドはセッションのプロンプトで
-`! <command>` として実行するか、ターミナルで直接実行する。
+English | [日本語](./DEPLOY.ja.md)
 
-## 0. 前提
+Steps for the first deployment to production (Cloudflare). Run everything from the `worker/` directory.
+Creating resources and putting secrets requires your account authentication, so run each command at the
+session prompt as `! <command>`, or directly in your terminal.
+
+## 0. Prerequisites
 
 ```bash
 cd worker
 pnpm install
-pnpm exec wrangler login        # ブラウザでログイン
+pnpm exec wrangler login        # log in via the browser
 ```
 
-## 1. リソースを作成して ID を控える
+## 1. Create resources and note their IDs
 
 ```bash
-pnpm exec wrangler d1 create frontping            # → database_id を控える
-pnpm exec wrangler kv namespace create RL         # → id を控える
+pnpm exec wrangler d1 create frontping            # → note the database_id
+pnpm exec wrangler kv namespace create RL         # → note the id
 pnpm exec wrangler r2 bucket create frontping-exports
 ```
 
-## 2. リソースID をローカルに設定する（wrangler.toml は触らない）
+## 2. Set the resource IDs locally (do not touch wrangler.toml)
 
-`wrangler.toml` には実IDを書かない（**公開リポジトリに含めないため placeholder のまま**）。
-実IDは git 管理外の `.env.deploy` に入れ、deploy 時にだけ `wrangler.generated.toml` へ注入する。
+Do not write the real IDs into `wrangler.toml` (**it stays as placeholders so they are never committed to a public repo**).
+Put the real IDs into `.env.deploy` (untracked by git); they are injected into `wrangler.generated.toml` only at deploy time.
 
 ```bash
 cp .env.deploy.example .env.deploy
-# .env.deploy を編集:
-#   D1_DATABASE_ID=手順1の D1 id
-#   KV_RL_ID=手順1の KV id
+# Edit .env.deploy:
+#   D1_DATABASE_ID=the D1 id from step 1
+#   KV_RL_ID=the KV id from step 1
 ```
 
-ローカル開発（`wrangler dev --local`）は placeholder のままで動くため、ID 設定は deploy/remote 操作のときだけ必要。
-`[vars] APP_CONFIG`（allowed_origins / limits …）や cron などの構成変更は、`wrangler.toml` を普通に編集してコミットすればよい。
+Local development (`wrangler dev --local`) works with the placeholders as-is, so you only need to set the IDs for deploy/remote operations.
+Configuration changes such as `[vars] APP_CONFIG` (allowed_origins / limits …) or cron can just be edited in `wrangler.toml` and committed normally.
 
-## 3. マイグレーションを本番 D1 に適用
+## 3. Apply migrations to the production D1
 
-`config:gen` が `.env.deploy` の実IDを `wrangler.generated.toml` に注入し、それを使って適用する。
+`config:gen` injects the real IDs from `.env.deploy` into `wrangler.generated.toml`, which is then used to apply the migrations.
 
 ```bash
 pnpm run migrate:remote
 ```
 
-## 4. secret を投入（§9.4 / §13.4 / §14.3）
+## 4. Put secrets (§9.4 / §13.4 / §14.3)
 
 ```bash
-# 管理API / dashboard 用トークン（app_id ごと）
-echo '{"product_recommender":"<長いランダム文字列>"}' | pnpm exec wrangler secret put METRICS_TOKENS
+# Token for the admin API / dashboard (per app_id)
+echo '{"product_recommender":"<long random string>"}' | pnpm exec wrangler secret put METRICS_TOKENS
 
-# エラー/容量通知の webhook（任意。未設定なら通知は no-op）
+# Webhook for error / capacity notifications (optional; a no-op if unset)
 pnpm exec wrangler secret put NOTIFY_WEBHOOK_URL
 
-# IP ハッシュ用の salt（任意。設定時のみ ip_hash を保存）
+# Salt for IP hashing (optional; ip_hash is stored only when set)
 pnpm exec wrangler secret put IP_HASH_SECRET
 ```
 
-## 5. デプロイ
+## 5. Deploy
 
 ```bash
-pnpm run deploy   # = config:gen して wrangler.generated.toml で deploy
+pnpm run deploy   # = config:gen, then deploy with wrangler.generated.toml
 ```
 
-Cron Triggers（日次/毎時/月次）は `wrangler.toml` の `[triggers]` から自動登録される。
+Cron Triggers (daily / hourly / monthly) are registered automatically from `[triggers]` in `wrangler.toml`.
 
-### CI からデプロイする場合（GitHub Actions）
+### Deploying from CI (GitHub Actions)
 
-`.github/workflows/deploy.yml`（手動 `workflow_dispatch`）が用意してある。GitHub 側に以下を設定する。
+`.github/workflows/deploy.yml` (manual `workflow_dispatch`) is provided. Configure the following on GitHub:
 
-- Repository **Variables**: `D1_DATABASE_ID`, `KV_RL_ID`（ID は秘密ではないので variables でよい）
-- Repository **Secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`（wrangler の認証用）
+- Repository **Variables**: `D1_DATABASE_ID`, `KV_RL_ID` (IDs are not secrets, so variables are fine)
+- Repository **Secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (for wrangler authentication)
 
-CI では `.env.deploy` の代わりにこれらの環境変数が使われ、`config:gen` が同じく ID を注入する。
-`METRICS_TOKENS` 等の Worker secret は `wrangler secret put`（手順4）で投入済みのものが使われる。
+In CI these environment variables are used instead of `.env.deploy`, and `config:gen` injects the IDs the same way.
+Worker secrets such as `METRICS_TOKENS` use the values already set via `wrangler secret put` (step 4).
 
-## 6. 動作確認
+## 6. Verify
 
 ```bash
-# 公開ホスト名は deploy 出力に表示される（例: https://frontping.<subdomain>.workers.dev）
+# The public hostname is shown in the deploy output (e.g. https://frontping.<subdomain>.workers.dev)
 BASE=https://frontping.<subdomain>.workers.dev
 
 curl -s $BASE/health
 # => {"ok":true}
 
-# ダッシュボード（ブラウザで開く）。app_id と token を入力して Load
+# Dashboard (open in a browser). Enter app_id and token, then Load
 open $BASE/dashboard
 
-# イベント1件（Origin は APP_CONFIG の allowed_origins に含まれること）
+# A single event (the Origin must be in the app's allowed_origins)
 curl -s -X POST $BASE/events \
   -H 'Content-Type: application/json' -H 'Origin: https://example.com' \
   -d '{"app_id":"product_recommender","event_name":"page_view","session_id":"s","occurred_at":"2026-06-02T00:00:00.000Z","page_path":"/"}'
 # => {"ok":true} (202)
 ```
 
-## 7. 手動 export（任意・再実行用, §20.1）
+## 7. Manual export (optional, for re-runs, §20.1)
 
 ```bash
 curl -s -X POST "$BASE/admin/export?app_id=product_recommender&year=2026&month=5" \
   -H "Authorization: Bearer <metrics token>"
 ```
 
-## メモ
+## Notes
 
-- 月次 export は `0 4 1 * *`（UTC）で前月分を自動実行。
-- 容量逼迫アラート・retention・daily_session_metrics 再計算も Cron で自動実行（§19.4）。
-- 設定変更（origins / limits / token）は再デプロイ or `wrangler secret put` で反映（静的構成）。
+- The monthly export runs at `0 4 1 * *` (UTC) for the previous month.
+- Capacity alerts, retention, and daily_session_metrics recomputation also run automatically via Cron (§19.4).
+- Configuration changes (origins / limits / token) take effect via redeploy or `wrangler secret put` (static configuration).
