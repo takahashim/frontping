@@ -1,6 +1,9 @@
-import type { AnalyticsConfig, ErrorOptions, EventPayload, TrackOptions } from "./types";
+import type { AnalyticsConfig, ErrorOptions, EventPayload, Transport, TrackOptions } from "./types";
+import { DomTransport } from "./transport";
+import { Backoff } from "./backoff";
 
-export type { AnalyticsConfig, TrackOptions, ErrorOptions, EventPayload } from "./types";
+export type { AnalyticsConfig, TrackOptions, ErrorOptions, EventPayload, Transport, PostResult } from "./types";
+export { DomTransport } from "./transport";
 
 const DEFAULT_MAX_BATCH = 20;
 const DEFAULT_FLUSH_MS = 5000;
@@ -42,8 +45,9 @@ export class Frontping {
   private readonly cfg: Required<Pick<AnalyticsConfig, "endpoint" | "appId" | "maxBatch" | "flushIntervalMs" | "useBeacon">> &
     AnalyticsConfig;
   private readonly sessionId: string;
+  private readonly transport: Transport;
+  private readonly backoff = new Backoff();
   private queue: EventPayload[] = [];
-  private pauseUntil = 0; // §17.6 これより前は送信停止
   private dropped = 0;
   private timer: ReturnType<typeof setInterval> | null = null;
   private unloadHandlers: Array<() => void> = [];
@@ -56,6 +60,7 @@ export class Frontping {
       ...config,
       endpoint: config.endpoint.replace(/\/+$/, ""),
     };
+    this.transport = config.transport ?? new DomTransport();
     this.sessionId = genSessionId();
     this.startTimer();
     this.registerUnload();
@@ -84,7 +89,7 @@ export class Frontping {
 
   /** エラーは即時送信（/errors）。429 中は破棄。 */
   trackError(message: string, opts: ErrorOptions = {}): void {
-    if (nowMs() < this.pauseUntil) {
+    if (this.backoff.paused()) {
       this.dropped++;
       return;
     }
@@ -139,7 +144,7 @@ export class Frontping {
   }
 
   private enqueue(ev: EventPayload): void {
-    if (nowMs() < this.pauseUntil) {
+    if (this.backoff.paused()) {
       this.dropped++;
       return;
     }
@@ -149,7 +154,7 @@ export class Frontping {
 
   private async flushInternal(useBeacon: boolean): Promise<void> {
     if (this.queue.length === 0) return;
-    if (nowMs() < this.pauseUntil) {
+    if (this.backoff.paused()) {
       // 停止中はキューを破棄（無限堆積させない, §17.6）
       this.dropped += this.queue.length;
       this.queue = [];
@@ -159,44 +164,19 @@ export class Frontping {
     const url = `${this.cfg.endpoint}/events/batch`;
     const body = JSON.stringify({ events: batch });
 
-    if (useBeacon && this.cfg.useBeacon && this.tryBeacon(url, body)) return;
+    if (useBeacon && this.cfg.useBeacon && this.transport.beacon(url, body)) return;
     await this.send(url, body);
   }
 
-  // §15.2 / §17.4 beacon は text/plain で送る
-  private tryBeacon(url: string, body: string): boolean {
-    const nav = (globalThis as { navigator?: Navigator }).navigator;
-    if (nav && typeof nav.sendBeacon === "function") {
-      try {
-        return nav.sendBeacon(url, new Blob([body], { type: "text/plain" }));
-      } catch {
-        return false;
-      }
-    }
-    return false;
-  }
-
+  // 送信し、429 ならバックオフ。リトライはしない（§17.6 / §22.1）。
   private async send(url: string, body: string): Promise<void> {
-    const f = (globalThis as { fetch?: typeof fetch }).fetch;
-    if (!f) return;
-    try {
-      const res = await f(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body,
-        keepalive: true,
-      });
-      // §17.6 429 は Retry-After 分だけ送信停止。リトライしない。
-      if (res.status === 429) {
-        const ra = Number(res.headers.get("Retry-After"));
-        const sec = Number.isFinite(ra) && ra > 0 ? ra : 60;
-        this.pauseUntil = nowMs() + sec * 1000;
-        if (this.cfg.debug) console.warn(`[frontping] rate limited, pausing ${sec}s`);
-      }
-      // 他の非2xx もリトライしない（握りつぶす, §22.1）
-    } catch {
-      // ネットワーク失敗もユーザーに見せずリトライしない
+    const res = await this.transport.post(url, body);
+    if (res?.status === 429) {
+      const sec = res.retryAfterSec ?? 60;
+      this.backoff.pauseForSec(sec);
+      if (this.cfg.debug) console.warn(`[frontping] rate limited, pausing ${sec}s`);
     }
+    // 他の非2xx・ネットワーク失敗もリトライしない（握りつぶす）
   }
 
   private startTimer(): void {

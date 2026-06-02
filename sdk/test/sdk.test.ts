@@ -192,3 +192,41 @@ describe("beacon on unload (§17.4)", () => {
     a.destroy();
   });
 });
+
+describe("injectable transport (#1)", () => {
+  it("uses the provided transport without touching global fetch", async () => {
+    const calls: { url: string; body: any }[] = [];
+    const transport = {
+      post: vi.fn(async (url: string, body: string) => {
+        calls.push({ url, body: JSON.parse(body) });
+        return { status: 202, retryAfterSec: null };
+      }),
+      beacon: vi.fn(() => true),
+    };
+    const a = new Frontping({ endpoint: ENDPOINT, appId: "app1", transport });
+    a.trackPageView("/x");
+    await a.flush();
+
+    expect(transport.post).toHaveBeenCalledTimes(1);
+    expect(calls[0]!.url).toBe(`${ENDPOINT}/events/batch`);
+    expect(calls[0]!.body.events[0].event_name).toBe("page_view");
+    expect(calls).toHaveLength(1);
+    a.destroy();
+  });
+
+  it("pauses when the transport returns 429 (no global stubbing)", async () => {
+    const transport = {
+      post: vi.fn(async () => ({ status: 429, retryAfterSec: 30 })),
+      beacon: vi.fn(() => true),
+    };
+    const a = new Frontping({ endpoint: ENDPOINT, appId: "app1", transport });
+    a.track("page_view", { pagePath: "/1" });
+    await a.flush();
+    a.track("page_view", { pagePath: "/2" });
+    await a.flush();
+
+    expect(transport.post).toHaveBeenCalledTimes(1); // 停止中は送られない
+    expect(a.droppedCount()).toBeGreaterThan(0);
+    a.destroy();
+  });
+});
