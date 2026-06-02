@@ -1,14 +1,14 @@
 import { Hono } from "hono";
-import type { Env, AppConfig } from "./types";
+import type { Env } from "./types";
 import { collect } from "./routes/collect";
 import { getMetrics, getTimeseries } from "./routes/metrics";
+import { postExport } from "./routes/admin";
 import { preflightHeaders } from "./lib/cors";
 import { runRetention } from "./db/retention";
 import { recomputeYesterday } from "./db/aggregate";
 import { checkCapacity } from "./lib/capacity";
-import { exportPreviousMonth, exportMonth } from "./db/exporter";
-import { getAppConfig } from "./lib/config";
-import { checkMetricsAuth } from "./lib/auth";
+import { exportPreviousMonth } from "./db/exporter";
+import { getAllConfigs } from "./lib/config";
 import { DASHBOARD_HTML } from "./dashboard";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -28,23 +28,8 @@ app.post("/errors", (c) => collect(c, "error"));
 app.get("/metrics", (c) => getMetrics(c));
 app.get("/metrics/timeseries", (c) => getTimeseries(c));
 
-// §20.1 手動 export（管理API。token 認証。Phase 4 自動化までの補助 / 再実行用）
-app.post("/admin/export", async (c) => {
-  const appId = c.req.query("app_id");
-  if (!appId || !getAppConfig(c.env, appId)) return c.json({ error: "invalid_app" }, 403);
-  if (!checkMetricsAuth(c.env, appId, c.req.header("Authorization") ?? null)) {
-    return c.json({ error: "unauthorized" }, 401);
-  }
-  if (!c.env.EXPORTS) return c.json({ error: "export_not_configured" }, 501);
-  const year = Number(c.req.query("year"));
-  const month = Number(c.req.query("month"));
-  if (!Number.isInteger(year) || !(month >= 1 && month <= 12)) {
-    return c.json({ error: "year_month_required" }, 400);
-  }
-  const includeRaw = c.req.query("include_raw") === "true";
-  const result = await exportMonth(c.env, appId, year, month, { includeRaw });
-  return c.json({ ok: true, ...result });
-});
+// §20.1 手動 export（管理API）
+app.post("/admin/export", (c) => postExport(c));
 
 // §18.1 最小ダッシュボード（読み取り専用・同一オリジンで /metrics を叩く）
 app.get("/dashboard", (c) =>
@@ -53,14 +38,6 @@ app.get("/dashboard", (c) =>
 
 app.get("/health", (c) => c.json({ ok: true }));
 
-function loadConfigs(env: Env): Record<string, AppConfig> {
-  try {
-    return JSON.parse(env.APP_CONFIG) as Record<string, AppConfig>;
-  } catch {
-    return {};
-  }
-}
-
 export default {
   fetch: app.fetch,
 
@@ -68,7 +45,7 @@ export default {
   async scheduled(event: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
     const nowMs = Date.now();
     const nowIso = new Date(nowMs).toISOString();
-    const configs = loadConfigs(env);
+    const configs = getAllConfigs(env);
 
     switch (event.cron) {
       case "0 3 * * *": // 日次: retention + 前日 session metrics 再計算

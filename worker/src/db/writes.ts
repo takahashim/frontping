@@ -1,32 +1,8 @@
 import type { NormalizedEvent } from "../types";
+import { SESSION_EVENTS, SESSION_FLAG, isErrorEvent } from "../lib/events";
 
 // §25.7 1リクエスト分の書き込みを 1 batch（単一トランザクション）にまとめる。
 // raw_events を source of truth とし、daily/session はそこから再生成可能（§25.5）。
-
-const SESSION_EVENTS = new Set([
-  "widget_opened",
-  "flow_started",
-  "step_viewed",
-  "choice_selected",
-  "recommendation_shown",
-  "recommendation_accepted",
-  "recommendation_rejected",
-  "flow_restarted",
-  "error_occurred",
-  "api_failed",
-]);
-
-// §11.2 セッションフラグの更新マップ
-const FLAG: Record<string, "opened" | "started" | "completed" | "accepted" | "rejected" | "restarted" | "errored"> = {
-  widget_opened: "opened",
-  flow_started: "started",
-  recommendation_shown: "completed",
-  recommendation_accepted: "accepted",
-  recommendation_rejected: "rejected",
-  flow_restarted: "restarted",
-  error_occurred: "errored",
-  api_failed: "errored",
-};
 
 function dayOf(occurredAt: string): string {
   return occurredAt.slice(0, 10); // YYYY-MM-DD (UTC)
@@ -95,7 +71,7 @@ function dailyUpsert(db: D1Database, e: NormalizedEvent, count: number) {
 // §11.3 冪等な session_summaries upsert。
 // choices_json はライブ更新せず、日次再計算で raw_events から再構築する（§25.5）。
 function sessionUpsert(db: D1Database, e: NormalizedEvent) {
-  const flag = FLAG[e.event_name];
+  const flag = SESSION_FLAG[e.event_name];
   const cols = {
     opened: flag === "opened" ? 1 : 0,
     started: flag === "started" ? 1 : 0,
@@ -155,7 +131,7 @@ export async function writeEvents(
 
   for (const e of events) {
     stmts.push(rawInsert(db, e, ctx.userAgent, ctx.ipHash));
-    if (e.event_name === "error_occurred" || e.event_name === "api_failed") {
+    if (isErrorEvent(e.event_name)) {
       stmts.push(errorInsert(db, e, ctx.userAgent, ctx.ipHash));
     }
     if (SESSION_EVENTS.has(e.event_name)) {

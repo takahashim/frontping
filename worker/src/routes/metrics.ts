@@ -1,7 +1,6 @@
 import type { Context } from "hono";
 import type { Env } from "../types";
-import { getAppConfig } from "../lib/config";
-import { checkMetricsAuth } from "../lib/auth";
+import { requireMetricsAuth } from "./guard";
 
 // §9.4 GET /metrics（Phase 2）。daily_* から集計値を返す。要 token 認証。
 
@@ -10,14 +9,10 @@ function ratio(num: number, den: number): number | null {
 }
 
 export async function getMetrics(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const guard = requireMetricsAuth(c);
+  if (!guard.ok) return guard.res;
   const env = c.env;
-  const appId = c.req.query("app_id");
-  if (!appId) return c.json({ error: "app_id_required" }, 400);
-  if (!getAppConfig(env, appId)) return c.json({ error: "invalid_app" }, 403);
-
-  if (!checkMetricsAuth(env, appId, c.req.header("Authorization") ?? null)) {
-    return c.json({ error: "unauthorized" }, 401);
-  }
+  const appId = guard.appId;
 
   const from = c.req.query("from") ?? "0000-01-01";
   const to = c.req.query("to") ?? "9999-12-31";
@@ -106,13 +101,10 @@ function buildSeries(buckets: string[], rows: TsRow[]) {
 }
 
 export async function getTimeseries(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const guard = requireMetricsAuth(c);
+  if (!guard.ok) return guard.res;
   const env = c.env;
-  const appId = c.req.query("app_id");
-  if (!appId) return c.json({ error: "app_id_required" }, 400);
-  if (!getAppConfig(env, appId)) return c.json({ error: "invalid_app" }, 403);
-  if (!checkMetricsAuth(env, appId, c.req.header("Authorization") ?? null)) {
-    return c.json({ error: "unauthorized" }, 401);
-  }
+  const appId = guard.appId;
 
   const range = c.req.query("range") === "30d" ? "30d" : "24h";
   const now = Date.now();

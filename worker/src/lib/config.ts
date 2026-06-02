@@ -5,7 +5,8 @@ import type { AppConfig, Env } from "../types";
 
 let cache: Record<string, AppConfig> | null = null;
 
-export function getAppConfig(env: Env, appId: string): AppConfig | null {
+// APP_CONFIG を1度だけパースして全 app 設定を返す（単一パース地点）
+export function getAllConfigs(env: Env): Record<string, AppConfig> {
   if (!cache) {
     try {
       cache = JSON.parse(env.APP_CONFIG) as Record<string, AppConfig>;
@@ -13,7 +14,11 @@ export function getAppConfig(env: Env, appId: string): AppConfig | null {
       cache = {};
     }
   }
-  return cache[appId] ?? null;
+  return cache;
+}
+
+export function getAppConfig(env: Env, appId: string): AppConfig | null {
+  return getAllConfigs(env)[appId] ?? null;
 }
 
 export function getMetricsToken(env: Env, appId: string): string | null {

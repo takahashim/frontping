@@ -1,6 +1,7 @@
 import type { IncomingEvent, NormalizedEvent } from "../types";
 import { clamp } from "./validate";
 import { maskPII } from "./sanitize";
+import { isErrorEvent } from "./events";
 
 // §25.2 page_path から query string / fragment を除去
 export function stripPath(path: string | undefined): string {
@@ -36,7 +37,7 @@ function asString(v: unknown): string | null {
 // 主要な分析軸を列に展開する（§25.1 正規化）
 export function normalizeEvent(ev: IncomingEvent, receivedAtMs: number): NormalizedEvent {
   const props = (ev.properties ?? {}) as Record<string, unknown>;
-  const isError = ev.event_name === "error_occurred" || ev.event_name === "api_failed";
+  const isError = isErrorEvent(ev.event_name);
 
   const n: NormalizedEvent = {
     occurred_at: clampOccurredAt(ev.occurred_at, receivedAtMs),
