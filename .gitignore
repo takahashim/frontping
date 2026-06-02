@@ -6,6 +6,8 @@ node_modules/
 .dev.vars
 .dev.vars.*
 wrangler.toml.bak
+# deploy 時に実IDを注入して生成（公開リポジトリには含めない）
+wrangler.generated.toml
 # ローカル D1 / KV / R2 などのエミュレータ状態
 .mf/
 dist/
@@ -26,6 +28,7 @@ coverage/
 .env
 .env.*
 !.env.example
+!.env.deploy.example
 
 # --- Editor / backup files ---
 *~

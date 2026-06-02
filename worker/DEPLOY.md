@@ -20,19 +20,27 @@ pnpm exec wrangler kv namespace create RL         # → id を控える
 pnpm exec wrangler r2 bucket create frontping-exports
 ```
 
-## 2. wrangler.toml のプレースホルダを差し替える
+## 2. リソースID をローカルに設定する（wrangler.toml は触らない）
 
-- `[[d1_databases]]` の `database_id = "REPLACE_WITH_D1_ID"` → 手順1の D1 id
-- `[[kv_namespaces]]` の `id = "REPLACE_WITH_KV_ID"` → 手順1の KV id
-- `r2_buckets` の `bucket_name` はそのまま（`frontping-exports`）
+`wrangler.toml` には実IDを書かない（**公開リポジトリに含めないため placeholder のまま**）。
+実IDは git 管理外の `.env.deploy` に入れ、deploy 時にだけ `wrangler.generated.toml` へ注入する。
 
-`[vars] APP_CONFIG` を本番の app 定義に編集する（allowed_origins / limits / retention / notification）。
-`compatibility_date` は実在の日付であればよい（古すぎなければ調整不要）。
+```bash
+cp .env.deploy.example .env.deploy
+# .env.deploy を編集:
+#   D1_DATABASE_ID=手順1の D1 id
+#   KV_RL_ID=手順1の KV id
+```
+
+ローカル開発（`wrangler dev --local`）は placeholder のままで動くため、ID 設定は deploy/remote 操作のときだけ必要。
+`[vars] APP_CONFIG`（allowed_origins / limits …）や cron などの構成変更は、`wrangler.toml` を普通に編集してコミットすればよい。
 
 ## 3. マイグレーションを本番 D1 に適用
 
+`config:gen` が `.env.deploy` の実IDを `wrangler.generated.toml` に注入し、それを使って適用する。
+
 ```bash
-pnpm exec wrangler d1 migrations apply frontping --remote
+pnpm run migrate:remote
 ```
 
 ## 4. secret を投入（§9.4 / §13.4 / §14.3）
@@ -51,10 +59,20 @@ pnpm exec wrangler secret put IP_HASH_SECRET
 ## 5. デプロイ
 
 ```bash
-pnpm exec wrangler deploy
+pnpm run deploy   # = config:gen して wrangler.generated.toml で deploy
 ```
 
 Cron Triggers（日次/毎時/月次）は `wrangler.toml` の `[triggers]` から自動登録される。
+
+### CI からデプロイする場合（GitHub Actions）
+
+`.github/workflows/deploy.yml`（手動 `workflow_dispatch`）が用意してある。GitHub 側に以下を設定する。
+
+- Repository **Variables**: `D1_DATABASE_ID`, `KV_RL_ID`（ID は秘密ではないので variables でよい）
+- Repository **Secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`（wrangler の認証用）
+
+CI では `.env.deploy` の代わりにこれらの環境変数が使われ、`config:gen` が同じく ID を注入する。
+`METRICS_TOKENS` 等の Worker secret は `wrangler secret put`（手順4）で投入済みのものが使われる。
 
 ## 6. 動作確認
 

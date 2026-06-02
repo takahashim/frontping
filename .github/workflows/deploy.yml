@@ -1,0 +1,39 @@
+name: deploy worker
+
+# 手動トリガのみ（誤デプロイ防止）。
+# 必要な設定:
+#   Variables: D1_DATABASE_ID, KV_RL_ID
+#   Secrets:   CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: worker
+    env:
+      D1_DATABASE_ID: ${{ vars.D1_DATABASE_ID }}
+      KV_RL_ID: ${{ vars.KV_RL_ID }}
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: worker/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations (remote)
+        run: pnpm run migrate:remote
+
+      - name: Deploy
+        run: pnpm run deploy

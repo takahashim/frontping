@@ -6,11 +6,12 @@
   "packageManager": "pnpm@10.28.2",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "config:gen": "node scripts/gen-config.mjs",
+    "deploy": "pnpm config:gen && wrangler deploy --config wrangler.generated.toml",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "migrate:local": "wrangler d1 migrations apply frontping --local",
-    "migrate:remote": "wrangler d1 migrations apply frontping --remote"
+    "migrate:remote": "pnpm config:gen && wrangler d1 migrations apply frontping --remote --config wrangler.generated.toml"
   },
   "dependencies": {
     "hono": "^4.6.0"
