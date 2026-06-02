@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2020", "DOM"],
+    "checkJs": true,
+    "noEmit": true,
+    "strict": true,
+    "paths": {
+      "/sdk.js": ["../../sdk/src/index.ts"]
+    }
+  },
+  "include": ["app.js"]
+}

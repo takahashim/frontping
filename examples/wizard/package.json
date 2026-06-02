@@ -1,0 +1,11 @@
+{
+  "name": "frontping-wizard-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "build:sdk": "pnpm --dir ../../sdk install --frozen-lockfile && pnpm --dir ../../sdk build",
+    "start": "node serve.mjs"
+  }
+}

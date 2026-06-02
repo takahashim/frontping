@@ -81,3 +81,70 @@ export async function getMetrics(c: Context<{ Bindings: Env }>): Promise<Respons
     },
   });
 }
+
+// --- 時系列（ダッシュボードのグラフ用）---
+// 24h: raw_events を時間バケットで集計（30日保存内なので取得可能）
+// 30d: daily_event_counts を日バケットで集計（長期保存）
+
+type TsRow = { b: string; event_name: string; c: number };
+
+function buildSeries(buckets: string[], rows: TsRow[]) {
+  const idx = new Map(buckets.map((b, i) => [b, i]));
+  const z = () => new Array<number>(buckets.length).fill(0);
+  const series = { page_views: z(), clicks: z(), errors: z() };
+  const add = (arr: number[], i: number, n: number) => {
+    arr[i] = (arr[i] ?? 0) + n;
+  };
+  for (const r of rows) {
+    const i = idx.get(r.b);
+    if (i == null) continue;
+    if (r.event_name === "page_view") add(series.page_views, i, r.c);
+    else if (r.event_name === "click") add(series.clicks, i, r.c);
+    else if (r.event_name === "error_occurred" || r.event_name === "api_failed") add(series.errors, i, r.c);
+  }
+  return series;
+}
+
+export async function getTimeseries(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const env = c.env;
+  const appId = c.req.query("app_id");
+  if (!appId) return c.json({ error: "app_id_required" }, 400);
+  if (!getAppConfig(env, appId)) return c.json({ error: "invalid_app" }, 403);
+  if (!checkMetricsAuth(env, appId, c.req.header("Authorization") ?? null)) {
+    return c.json({ error: "unauthorized" }, 401);
+  }
+
+  const range = c.req.query("range") === "30d" ? "30d" : "24h";
+  const now = Date.now();
+
+  if (range === "24h") {
+    // 5分バケット × 288 本 = 24時間
+    const FIVE = 5 * 60_000;
+    const cur = Math.floor(now / FIVE) * FIVE;
+    const buckets: string[] = [];
+    for (let i = 287; i >= 0; i--) buckets.push(new Date(cur - i * FIVE).toISOString().slice(0, 16));
+    const startIso = new Date(cur - 287 * FIVE).toISOString().slice(0, 16) + ":00.000Z";
+    // 分を5分単位に切り捨ててバケットキーを作る（'YYYY-MM-DDTHH:MM'）
+    const rows = await env.DB.prepare(
+      `SELECT substr(occurred_at,1,14) || printf('%02d', (CAST(substr(occurred_at,15,2) AS INTEGER) / 5) * 5) AS b,
+              event_name, COUNT(*) AS c
+       FROM raw_events WHERE app_id = ? AND occurred_at >= ? GROUP BY b, event_name`
+    )
+      .bind(appId, startIso)
+      .all<TsRow>();
+    return c.json({ app_id: appId, range, unit: "5min", buckets, series: buildSeries(buckets, rows.results) });
+  }
+
+  const DAY = 86_400_000;
+  const cur = Math.floor(now / DAY) * DAY;
+  const buckets: string[] = [];
+  for (let i = 29; i >= 0; i--) buckets.push(new Date(cur - i * DAY).toISOString().slice(0, 10));
+  const startDay = buckets[0];
+  const rows = await env.DB.prepare(
+    `SELECT day AS b, event_name, SUM(count) AS c
+     FROM daily_event_counts WHERE app_id = ? AND day >= ? GROUP BY day, event_name`
+  )
+    .bind(appId, startDay)
+    .all<TsRow>();
+  return c.json({ app_id: appId, range, unit: "day", buckets, series: buildSeries(buckets, rows.results) });
+}

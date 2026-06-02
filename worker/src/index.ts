@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import type { Env, AppConfig } from "./types";
 import { collect } from "./routes/collect";
-import { getMetrics } from "./routes/metrics";
+import { getMetrics, getTimeseries } from "./routes/metrics";
 import { preflightHeaders } from "./lib/cors";
 import { runRetention } from "./db/retention";
 import { recomputeYesterday } from "./db/aggregate";
@@ -26,6 +26,7 @@ app.post("/errors", (c) => collect(c, "error"));
 
 // メトリクス（§9.4）
 app.get("/metrics", (c) => getMetrics(c));
+app.get("/metrics/timeseries", (c) => getTimeseries(c));
 
 // §20.1 手動 export（管理API。token 認証。Phase 4 自動化までの補助 / 再実行用）
 app.post("/admin/export", async (c) => {

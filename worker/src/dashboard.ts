@@ -24,6 +24,11 @@ export const DASHBOARD_HTML = `<!doctype html>
   .card .k { font-size: 12px; color: #666; }
   .err { color: #b91c1c; margin: 12px 0; white-space: pre-wrap; }
   .muted { color: #999; }
+  h2 { font-size: 14px; margin: 24px 0 8px; color: #444; }
+  .chart { border: 1px solid #ddd; border-radius: 10px; padding: 10px 12px; }
+  .chart svg { display: block; }
+  .legend { font-size: 12px; margin-top: 6px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .axis { display: flex; justify-content: space-between; font-size: 11px; margin-top: 2px; }
 </style>
 </head>
 <body>
@@ -37,6 +42,10 @@ export const DASHBOARD_HTML = `<!doctype html>
 </form>
 <div id="msg" class="err"></div>
 <div id="out" class="cards"></div>
+<h2>過去24時間（時間別）</h2>
+<div class="chart" id="c24"></div>
+<h2>過去30日（日別）</h2>
+<div class="chart" id="c30"></div>
 
 <script>
 (function () {
@@ -50,6 +59,71 @@ export const DASHBOARD_HTML = `<!doctype html>
 
   function card(k, v) {
     return '<div class="card"><div class="v">' + v + '</div><div class="k">' + k + '</div></div>';
+  }
+
+  var SVGNS = "http://www.w3.org/2000/svg";
+  function svgEl(name, attrs) {
+    var e = document.createElementNS(SVGNS, name);
+    for (var k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  }
+
+  var SERIES = [
+    { key: "page_views", label: "page views", color: "#2563eb" },
+    { key: "clicks", label: "clicks", color: "#16a34a" },
+    { key: "errors", label: "errors", color: "#dc2626" }
+  ];
+
+  function renderChart(elId, data) {
+    var el = $(elId);
+    el.innerHTML = "";
+    var W = 620, H = 130, pad = 6;
+    var n = data.buckets.length;
+    var max = 1;
+    SERIES.forEach(function (s) {
+      (data.series[s.key] || []).forEach(function (v) { if (v > max) max = v; });
+    });
+    var svg = svgEl("svg", { viewBox: "0 0 " + W + " " + H, width: "100%", height: H, preserveAspectRatio: "none" });
+    SERIES.forEach(function (s) {
+      var vals = data.series[s.key] || [];
+      var pts = vals.map(function (v, i) {
+        var x = n <= 1 ? pad : (i / (n - 1)) * (W - 2 * pad) + pad;
+        var y = H - pad - (v / max) * (H - 2 * pad);
+        return x.toFixed(1) + "," + y.toFixed(1);
+      }).join(" ");
+      svg.appendChild(svgEl("polyline", { points: pts, fill: "none", stroke: s.color, "stroke-width": "2" }));
+    });
+    el.appendChild(svg);
+
+    var leg = document.createElement("div");
+    leg.className = "legend";
+    var html = SERIES.map(function (s) {
+      return '<span style="color:' + s.color + '">● ' + s.label + "</span>";
+    }).join("");
+    html += '<span class="muted">最大 ' + max + " / " + data.unit + "</span>";
+    leg.innerHTML = html;
+    el.appendChild(leg);
+
+    var ax = document.createElement("div");
+    ax.className = "axis muted";
+    var ticks = Math.min(6, n);
+    var parts = [];
+    for (var t = 0; t < ticks; t++) {
+      var bi = ticks <= 1 ? 0 : Math.round((t / (ticks - 1)) * (n - 1));
+      var b = data.buckets[bi] || "";
+      // 5min/hour は時刻(HH:MM 等)、day は日付を表示（いずれも UTC）
+      parts.push("<span>" + (data.unit === "day" ? b : b.slice(11)) + "</span>");
+    }
+    ax.innerHTML = parts.join("");
+    el.appendChild(ax);
+  }
+
+  function loadChart(app, token, range, elId) {
+    var q = new URLSearchParams({ app_id: app, range: range });
+    fetch("/metrics/timeseries?" + q.toString(), { headers: { Authorization: "Bearer " + token } })
+      .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+      .then(function (d) { renderChart(elId, d); })
+      .catch(function (e) { $(elId).textContent = String(e); });
   }
 
   function render(s) {
@@ -87,7 +161,11 @@ export const DASHBOARD_HTML = `<!doctype html>
         if (!r.ok) throw new Error("HTTP " + r.status + (r.status === 401 ? " (token 不正)" : ""));
         return r.json();
       })
-      .then(function (j) { render(j.summary); })
+      .then(function (j) {
+        render(j.summary);
+        loadChart(app, token, "24h", "c24");
+        loadChart(app, token, "30d", "c30");
+      })
       .catch(function (err) { $("out").innerHTML = ""; $("msg").textContent = String(err); })
       .finally(function () { $("go").disabled = false; });
   });
