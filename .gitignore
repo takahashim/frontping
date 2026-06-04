@@ -12,6 +12,8 @@ examples/wizard/config.js
 wrangler.toml.bak
 # deploy 時に実IDを注入して生成（公開リポジトリには含めない）
 wrangler.generated.toml
+# サイト固有の APP_CONFIG（allowed_origins 等）。deploy 時に注入、repo には含めない
+app-config.json
 # ローカル D1 / KV / R2 などのエミュレータ状態
 .mf/
 dist/

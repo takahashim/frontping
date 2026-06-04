@@ -1,0 +1,14 @@
+{
+  "product_recommender": {
+    "allowed_origins": ["https://example.com", "https://www.example.com"],
+    "require_origin": true,
+    "limits": {
+      "events_per_minute": 600,
+      "events_per_day": 200000,
+      "raw_events_rows": 1000000,
+      "warn_threshold_ratio": 0.8
+    },
+    "retention": { "raw_events_days": 30, "error_events_days": 90, "session_summaries_days": 365 },
+    "notification": { "enabled": true, "dedupe_minutes": 10, "capacity_dedupe_minutes": 60 }
+  }
+}
