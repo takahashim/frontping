@@ -57,11 +57,11 @@ export function toCSV(columns: string[], rows: Record<string, unknown>[]): strin
   return rows.length ? `${head}\n${body}\n` : `${head}\n`;
 }
 
-export function toJSONL(rows: Record<string, unknown>[]): string {
+function toJSONL(rows: Record<string, unknown>[]): string {
   return rows.map((r) => JSON.stringify(r)).join("\n") + (rows.length ? "\n" : "");
 }
 
-export async function gzip(input: string): Promise<Uint8Array> {
+async function gzip(input: string): Promise<Uint8Array> {
   const cs = new CompressionStream("gzip");
   const stream = new Response(input).body!.pipeThrough(cs);
   const buf = await new Response(stream).arrayBuffer();

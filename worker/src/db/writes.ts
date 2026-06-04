@@ -68,8 +68,7 @@ function dailyUpsert(db: D1Database, e: NormalizedEvent, count: number) {
     );
 }
 
-// §11.3 冪等な session_summaries upsert。
-// choices_json はライブ更新せず、日次再計算で raw_events から再構築する（§25.5）。
+// §11.3 冪等な session_summaries upsert（フラグは MAX、時刻は MIN/MAX）。
 function sessionUpsert(db: D1Database, e: NormalizedEvent) {
   const flag = SESSION_FLAG[e.event_name];
   const cols = {

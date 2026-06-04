@@ -35,6 +35,7 @@ export default defineWorkersConfig({
             TEST_MIGRATIONS: migrations,
             APP_CONFIG: TEST_APP_CONFIG,
             METRICS_TOKENS: JSON.stringify({ test_app: "test-token" }),
+            NOTIFY_WEBHOOK_URL: "https://hooks.example.com/wh",
           },
         },
       },

@@ -77,6 +77,36 @@ export async function getMetrics(c: Context<{ Bindings: Env }>): Promise<Respons
   });
 }
 
+// §13 エラー深刻度。fingerprint 別に hits（発生数）と sources（影響発信源数=DISTINCT ip_hash）を返す。
+// ip_hash は IP_HASH_SECRET 設定時のみ記録されるため、未設定なら sources は 0。
+export async function getErrors(c: Context<{ Bindings: Env }>): Promise<Response> {
+  const guard = requireMetricsAuth(c);
+  if (!guard.ok) return guard.res;
+  const env = c.env;
+  const appId = guard.appId;
+  const from = c.req.query("from") ?? "0000-01-01";
+  const to = c.req.query("to") ?? "9999-12-31";
+  const limit = Math.min(Math.max(Number(c.req.query("limit")) || 20, 1), 100);
+
+  const rows = await env.DB.prepare(
+    `SELECT fingerprint,
+            COUNT(*) AS hits,
+            COUNT(DISTINCT ip_hash) AS sources,
+            MAX(message) AS message,
+            MAX(occurred_at) AS last_seen
+     FROM error_events
+     WHERE app_id = ? AND substr(occurred_at, 1, 10) >= ? AND substr(occurred_at, 1, 10) <= ?
+           AND fingerprint IS NOT NULL
+     GROUP BY fingerprint
+     ORDER BY hits DESC
+     LIMIT ?`
+  )
+    .bind(appId, from, to, limit)
+    .all();
+
+  return c.json({ app_id: appId, from, to, errors: rows.results });
+}
+
 // --- 時系列（ダッシュボードのグラフ用）---
 // 24h: raw_events を時間バケットで集計（30日保存内なので取得可能）
 // 30d: daily_event_counts を日バケットで集計（長期保存）

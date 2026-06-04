@@ -1,4 +1,4 @@
-import { SELF } from "cloudflare:test";
+import { SELF, env } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
 
 const ORIGIN = "https://app.example.com";
@@ -46,6 +46,37 @@ describe("GET /metrics (§9.4)", () => {
     // daily_session_metrics は cron で生成されるため、この時点では 0 / null
     expect(json.summary.completion_rate).toBeNull();
     expect(json.summary.error_rate).toBeNull();
+  });
+});
+
+describe("GET /metrics/errors (エラー深刻度)", () => {
+  async function seedErrors(): Promise<void> {
+    // fp_a: 3 hits / 2 distinct ip_hash, fp_b: 1 hit / 1 source
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO error_events (occurred_at, app_id, message, fingerprint, ip_hash) VALUES ('2026-06-02T01:00:00.000Z','test_app','boom','fp_a','ip1')`),
+      env.DB.prepare(`INSERT INTO error_events (occurred_at, app_id, message, fingerprint, ip_hash) VALUES ('2026-06-02T02:00:00.000Z','test_app','boom','fp_a','ip1')`),
+      env.DB.prepare(`INSERT INTO error_events (occurred_at, app_id, message, fingerprint, ip_hash) VALUES ('2026-06-02T03:00:00.000Z','test_app','boom','fp_a','ip2')`),
+      env.DB.prepare(`INSERT INTO error_events (occurred_at, app_id, message, fingerprint, ip_hash) VALUES ('2026-06-02T04:00:00.000Z','test_app','other','fp_b','ip3')`),
+    ]);
+  }
+
+  it("401 without token", async () => {
+    const res = await SELF.fetch("https://worker.test/metrics/errors?app_id=test_app");
+    expect(res.status).toBe(401);
+  });
+
+  it("returns fingerprints ranked by hits with distinct source counts", async () => {
+    await seedErrors();
+    const res = await SELF.fetch("https://worker.test/metrics/errors?app_id=test_app", {
+      headers: { Authorization: "Bearer test-token" },
+    });
+    expect(res.status).toBe(200);
+    const j = (await res.json()) as { errors: Array<{ fingerprint: string; hits: number; sources: number }> };
+    expect(j.errors[0]!.fingerprint).toBe("fp_a");
+    expect(j.errors[0]!.hits).toBe(3);
+    expect(j.errors[0]!.sources).toBe(2); // ip1, ip2
+    expect(j.errors[1]!.fingerprint).toBe("fp_b");
+    expect(j.errors[1]!.sources).toBe(1);
   });
 });
 

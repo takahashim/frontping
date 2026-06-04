@@ -1,14 +1,16 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
 import { collect } from "./routes/collect";
-import { getMetrics, getTimeseries } from "./routes/metrics";
+import { getMetrics, getTimeseries, getErrors } from "./routes/metrics";
 import { postExport } from "./routes/admin";
 import { preflightHeaders } from "./lib/cors";
 import { runRetention } from "./db/retention";
 import { recomputeYesterday } from "./db/aggregate";
+import { sendDailyDigest } from "./db/digest";
 import { checkCapacity } from "./lib/capacity";
 import { exportPreviousMonth } from "./db/exporter";
 import { getAllConfigs } from "./lib/config";
+import { notifyOps } from "./lib/notify";
 import { DASHBOARD_HTML } from "./dashboard";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -27,6 +29,7 @@ app.post("/errors", (c) => collect(c, "error"));
 // メトリクス（§9.4）
 app.get("/metrics", (c) => getMetrics(c));
 app.get("/metrics/timeseries", (c) => getTimeseries(c));
+app.get("/metrics/errors", (c) => getErrors(c));
 
 // §20.1 手動 export（管理API）
 app.post("/admin/export", (c) => postExport(c));
@@ -38,6 +41,24 @@ app.get("/dashboard", (c) =>
 
 app.get("/health", (c) => c.json({ ok: true }));
 
+// 各 Cron ジョブを失敗通知付きで実行する。1つが失敗しても他は止めない（§19.4）。
+// 失敗通知（webhook）自体がさらに失敗しても、この関数は決して reject しない
+// （reject すると呼び出し側のジョブチェーンが止まってしまうため）。
+async function runJob(env: Env, name: string, nowIso: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error(`[frontping] cron job failed: ${name}`, e);
+    try {
+      await notifyOps(env, `cron:${name}`, `[frontping] cron job failed: ${name}\n${msg}`, nowIso);
+    } catch (notifyErr) {
+      // 通知経路（webhook）が落ちていても後続ジョブを止めない
+      console.error(`[frontping] failed to notify cron failure: ${name}`, notifyErr);
+    }
+  }
+}
+
 export default {
   fetch: app.fetch,
 
@@ -48,19 +69,23 @@ export default {
     const configs = getAllConfigs(env);
 
     switch (event.cron) {
-      case "0 3 * * *": // 日次: retention + 前日 session metrics 再計算
+      case "0 3 * * *": {
+        // 日次: 前日集計 → ダイジェスト通知 → retention（各段は独立に失敗通知）
+        const yesterday = new Date(nowMs - 86_400_000).toISOString().slice(0, 10);
         ctx.waitUntil(
           (async () => {
-            await recomputeYesterday(env, nowMs);
-            await runRetention(env, configs);
+            await runJob(env, "recompute", nowIso, () => recomputeYesterday(env, nowMs));
+            await runJob(env, "digest", nowIso, () => sendDailyDigest(env, configs, yesterday));
+            await runJob(env, "retention", nowIso, () => runRetention(env, configs));
           })()
         );
         break;
+      }
       case "0 * * * *": // 毎時: 容量チェック / 逼迫アラート
-        ctx.waitUntil(checkCapacity(env, configs, nowIso));
+        ctx.waitUntil(runJob(env, "capacity", nowIso, () => checkCapacity(env, configs, nowIso)));
         break;
       case "0 4 1 * *": // 月次: 前月分を R2 export（§20）
-        ctx.waitUntil(exportPreviousMonth(env, Object.keys(configs), nowMs));
+        ctx.waitUntil(runJob(env, "export", nowIso, () => exportPreviousMonth(env, Object.keys(configs), nowMs)));
         break;
     }
   },

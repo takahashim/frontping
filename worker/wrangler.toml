@@ -3,6 +3,10 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+# Workers Logs（ログ保持・検索。運用調査をインフラ追加なしで可能に）
+[observability]
+enabled = true
+
 # --- D1 (raw_events / session_summaries / daily_* / error_events / dedupes) ---
 [[d1_databases]]
 binding = "DB"

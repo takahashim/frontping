@@ -3,7 +3,7 @@ import type { Env } from "../types";
 // §12.2 daily_session_metrics の冪等再計算。
 // 指定 day（既定: 前日 UTC）の session_summaries を集計して該当行を置き換える。
 // day 帰属は started_at ベース（§12.2）。
-export async function recomputeSessionMetrics(env: Env, day: string): Promise<void> {
+async function recomputeSessionMetrics(env: Env, day: string): Promise<void> {
   // 当該 day に開始したセッションを widget/flow 単位で集計
   await env.DB.prepare(
     `INSERT INTO daily_session_metrics

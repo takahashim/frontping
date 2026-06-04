@@ -55,10 +55,8 @@ CREATE TABLE session_summaries (
   errored INTEGER NOT NULL DEFAULT 0,
 
   max_step INTEGER NOT NULL DEFAULT 0,
-  step_count INTEGER NOT NULL DEFAULT 0,
 
   result_id TEXT,
-  choices_json TEXT NOT NULL DEFAULT '[]',
 
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -148,7 +146,6 @@ CREATE TABLE notification_dedupes (
   app_id TEXT NOT NULL,
   fingerprint TEXT NOT NULL,
   last_notified_at TEXT NOT NULL,
-  count INTEGER NOT NULL DEFAULT 1,
 
   PRIMARY KEY (app_id, fingerprint)
 );
