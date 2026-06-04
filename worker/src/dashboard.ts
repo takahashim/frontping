@@ -104,15 +104,22 @@ export const DASHBOARD_HTML = `<!doctype html>
     leg.innerHTML = html;
     el.appendChild(leg);
 
+    // バケットは UTC。時刻ラベルは閲覧ブラウザのローカルTZに変換して表示する。
+    function fmtTick(b) {
+      if (data.unit === "day") return b; // 'YYYY-MM-DD'（日付はそのまま）
+      var d = new Date(b + ":00Z"); // 'YYYY-MM-DDTHH:MM' を UTC として解釈
+      return isNaN(d.getTime())
+        ? b.slice(11)
+        : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    }
+
     var ax = document.createElement("div");
     ax.className = "axis muted";
     var ticks = Math.min(6, n);
     var parts = [];
     for (var t = 0; t < ticks; t++) {
       var bi = ticks <= 1 ? 0 : Math.round((t / (ticks - 1)) * (n - 1));
-      var b = data.buckets[bi] || "";
-      // 5min/hour は時刻(HH:MM 等)、day は日付を表示（いずれも UTC）
-      parts.push("<span>" + (data.unit === "day" ? b : b.slice(11)) + "</span>");
+      parts.push("<span>" + fmtTick(data.buckets[bi] || "") + "</span>");
     }
     ax.innerHTML = parts.join("");
     el.appendChild(ax);
