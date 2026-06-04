@@ -45,18 +45,41 @@ Configuration changes such as `[vars] APP_CONFIG` (allowed_origins / limits …)
 pnpm run migrate:remote
 ```
 
-## 4. Put secrets (§9.4 / §13.4 / §14.3)
+## 4. Put secrets (§13.4 / §14.3)
 
 ```bash
-# Token for the admin API / dashboard (per app_id)
-echo '{"product_recommender":"<long random string>"}' | pnpm exec wrangler secret put METRICS_TOKENS
-
 # Webhook for error / capacity notifications (optional; a no-op if unset)
 pnpm exec wrangler secret put NOTIFY_WEBHOOK_URL
 
 # Salt for IP hashing (optional; ip_hash is stored only when set)
 pnpm exec wrangler secret put IP_HASH_SECRET
 ```
+
+## 4b. Issue metrics/admin tokens (§9.4)
+
+`/metrics`・`/dashboard`・`/admin` のトークンは **D1 の `metrics_tokens` に sha256 ハッシュで保存**する
+（app ごとに独立。発行/失効が他 app に波及しない。平文は保存しない）。
+
+```bash
+pnpm run config:gen
+# トークンを発行 → SQL をファイルに（token=平文は STDERR に1度だけ表示）
+# 注: `pnpm run` はヘッダ行を stdout に出すので node を直接呼ぶ
+node scripts/issue-token.mjs product_recommender > /tmp/fp-token.sql
+head -1 /tmp/fp-token.sql   # INSERT で始まることを確認
+# 本番 D1 に適用（--remote の確認プロンプトに答えられるよう --file で渡す）
+pnpm exec wrangler d1 execute frontping --remote --config wrangler.generated.toml --file /tmp/fp-token.sql
+```
+
+> パイプ + `--command "$(cat)"` は `--remote` の確認プロンプトで固まるため使わない。
+
+失効はその app の行を消すだけ（他に影響なし）:
+
+```bash
+pnpm exec wrangler d1 execute frontping --remote --config wrangler.generated.toml \
+  --command "DELETE FROM metrics_tokens WHERE app_id='product_recommender'"
+```
+
+ローカルは `--local`（`--config` 不要）で同様に。
 
 ## 5. Deploy
 

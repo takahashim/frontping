@@ -1,19 +1,27 @@
 import type { Env } from "../types";
-import { getMetricsToken } from "./config";
 
-// §9.4 /metrics・管理API の Bearer トークン認証
-export function checkMetricsAuth(env: Env, appId: string, authHeader: string | null): boolean {
-  const expected = getMetricsToken(env, appId);
-  if (!expected) return false;
+// §9.4 metrics/admin の per-app トークン認証。
+// トークンは DB(metrics_tokens)に sha256 ハッシュで保存し、平文は保持しない。
+// app ごとに行が独立しているため、発行・失効は app 単位で他に波及しない。
+
+async function sha256hex(input: string): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(input));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+export async function verifyMetricsToken(
+  env: Env,
+  appId: string,
+  authHeader: string | null
+): Promise<boolean> {
   if (!authHeader) return false;
   const m = /^Bearer\s+(.+)$/.exec(authHeader);
   if (!m) return false;
-  return timingSafeEqual(m[1]!, expected);
-}
-
-function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return diff === 0;
+  const hash = await sha256hex(m[1]!);
+  const row = await env.DB.prepare(
+    "SELECT 1 AS ok FROM metrics_tokens WHERE app_id = ? AND token_hash = ?"
+  )
+    .bind(appId, hash)
+    .first<{ ok: number }>();
+  return !!row;
 }

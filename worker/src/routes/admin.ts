@@ -5,7 +5,7 @@ import { exportMonth } from "../db/exporter";
 
 // §20.1 手動 export（管理API。token 認証。自動化までの補助 / 再実行用）
 export async function postExport(c: Context<{ Bindings: Env }>): Promise<Response> {
-  const guard = requireMetricsAuth(c);
+  const guard = await requireMetricsAuth(c);
   if (!guard.ok) return guard.res;
 
   if (!c.env.EXPORTS) return c.json({ error: "export_not_configured" }, 501);

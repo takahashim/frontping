@@ -11,6 +11,7 @@
     "deploy": "pnpm config:gen && wrangler deploy --config wrangler.generated.toml",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "token:issue": "node scripts/issue-token.mjs",
     "migrate:local": "wrangler d1 migrations apply frontping --local",
     "migrate:remote": "pnpm config:gen && wrangler d1 migrations apply frontping --remote --config wrangler.generated.toml"
   },

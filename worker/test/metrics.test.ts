@@ -1,5 +1,6 @@
 import { SELF, env } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
+import { seedMetricsToken } from "./helpers";
 
 const ORIGIN = "https://app.example.com";
 
@@ -34,6 +35,7 @@ describe("GET /metrics (§9.4)", () => {
   });
 
   it("returns event counts and null rates when no sessions", async () => {
+    await seedMetricsToken("test_app", "test-token");
     await postEvent({ event_name: "page_view" });
     await postEvent({ event_name: "page_view" });
     await postEvent({ event_name: "click", properties: { target_id: "btn" } });
@@ -66,6 +68,7 @@ describe("GET /metrics/errors (エラー深刻度)", () => {
   });
 
   it("returns fingerprints ranked by hits with distinct source counts", async () => {
+    await seedMetricsToken("test_app", "test-token");
     await seedErrors();
     const res = await SELF.fetch("https://worker.test/metrics/errors?app_id=test_app", {
       headers: { Authorization: "Bearer test-token" },
@@ -90,6 +93,7 @@ describe("GET /metrics/timeseries (グラフ用)", () => {
   });
 
   it("24h: returns 288 five-minute buckets with counts", async () => {
+    await seedMetricsToken("test_app", "test-token");
     await postEvent({ event_name: "page_view" });
     await postEvent({ event_name: "page_view" });
     await postEvent({ event_name: "click", properties: { target_id: "b" } });
@@ -109,6 +113,7 @@ describe("GET /metrics/timeseries (グラフ用)", () => {
   });
 
   it("30d: returns 30 daily buckets from daily_event_counts", async () => {
+    await seedMetricsToken("test_app", "test-token");
     await postEvent({ event_name: "page_view" });
     const res = await ts("30d", { Authorization: "Bearer test-token" });
     const j = (await res.json()) as { unit: string; buckets: string[]; series: Record<string, number[]> };

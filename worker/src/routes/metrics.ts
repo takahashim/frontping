@@ -9,7 +9,7 @@ function ratio(num: number, den: number): number | null {
 }
 
 export async function getMetrics(c: Context<{ Bindings: Env }>): Promise<Response> {
-  const guard = requireMetricsAuth(c);
+  const guard = await requireMetricsAuth(c);
   if (!guard.ok) return guard.res;
   const env = c.env;
   const appId = guard.appId;
@@ -80,7 +80,7 @@ export async function getMetrics(c: Context<{ Bindings: Env }>): Promise<Respons
 // §13 エラー深刻度。fingerprint 別に hits（発生数）と sources（影響発信源数=DISTINCT ip_hash）を返す。
 // ip_hash は IP_HASH_SECRET 設定時のみ記録されるため、未設定なら sources は 0。
 export async function getErrors(c: Context<{ Bindings: Env }>): Promise<Response> {
-  const guard = requireMetricsAuth(c);
+  const guard = await requireMetricsAuth(c);
   if (!guard.ok) return guard.res;
   const env = c.env;
   const appId = guard.appId;
@@ -131,7 +131,7 @@ function buildSeries(buckets: string[], rows: TsRow[]) {
 }
 
 export async function getTimeseries(c: Context<{ Bindings: Env }>): Promise<Response> {
-  const guard = requireMetricsAuth(c);
+  const guard = await requireMetricsAuth(c);
   if (!guard.ok) return guard.res;
   const env = c.env;
   const appId = guard.appId;

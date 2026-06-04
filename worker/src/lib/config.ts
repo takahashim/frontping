@@ -20,13 +20,3 @@ export function getAllConfigs(env: Env): Record<string, AppConfig> {
 export function getAppConfig(env: Env, appId: string): AppConfig | null {
   return getAllConfigs(env)[appId] ?? null;
 }
-
-export function getMetricsToken(env: Env, appId: string): string | null {
-  if (!env.METRICS_TOKENS) return null;
-  try {
-    const map = JSON.parse(env.METRICS_TOKENS) as Record<string, string>;
-    return map[appId] ?? null;
-  } catch {
-    return null;
-  }
-}

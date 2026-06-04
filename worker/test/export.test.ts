@@ -1,6 +1,7 @@
 import { SELF, env } from "cloudflare:test";
 import { describe, it, expect, beforeEach } from "vitest";
 import { exportMonth, monthRange, previousMonth, toCSV } from "../src/db/exporter";
+import { seedMetricsToken } from "./helpers";
 
 const ORIGIN = "https://app.example.com";
 
@@ -105,6 +106,7 @@ describe("POST /admin/export (§20.1)", () => {
   });
 
   it("triggers export with a valid token", async () => {
+    await seedMetricsToken("test_app", "test-token");
     const res = await SELF.fetch("https://worker.test/admin/export?app_id=test_app&year=2026&month=5", {
       method: "POST",
       headers: { Authorization: "Bearer test-token" },

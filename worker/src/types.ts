@@ -7,7 +7,6 @@ export interface Env {
   // vars
   APP_CONFIG: string; // JSON: Record<app_id, AppConfig>
   // secrets
-  METRICS_TOKENS?: string; // JSON: Record<app_id, token> (§9.4)
   NOTIFY_WEBHOOK_URL?: string; // Slack/Discord webhook (§13.4)
   IP_HASH_SECRET?: string; // §14.3
 }
