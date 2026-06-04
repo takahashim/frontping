@@ -43,11 +43,15 @@ jobs:
 
       - name: Assemble wizard site
         working-directory: examples/wizard
+        env:
+          WIZARD_ENDPOINT: ${{ vars.WIZARD_ENDPOINT }}
         run: |
           cp ../../sdk/dist/index.js sdk.js
-          echo "window.FRONTPING_ENDPOINT = ${{ toJSON(vars.WIZARD_ENDPOINT) }};" > config.js
+          node -e 'const e = process.env.WIZARD_ENDPOINT || ""; require("fs").writeFileSync("config.js", "window.FRONTPING_ENDPOINT = " + JSON.stringify(e) + ";\n")'
 
       - uses: actions/configure-pages@v5
+        with:
+          enablement: true
 
       - uses: actions/upload-pages-artifact@v3
         with:
