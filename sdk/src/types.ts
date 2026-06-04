@@ -47,12 +47,27 @@ export interface EventPayload {
   properties?: Record<string, unknown>;
 }
 
-export interface TrackOptions {
-  pagePath?: string;
-  widgetId?: string;
-  flowVersion?: string;
-  properties?: Record<string, unknown>;
-  occurredAt?: string;
+/** イベント名 → そのイベントの properties 形（spec §7 の属性表に対応） */
+export type EventProps = Record<string, unknown>;
+export type EventMap = Record<string, EventProps>;
+
+/** 属性なしイベント（page_view 等）の properties 型 */
+export type NoProps = Record<string, never>;
+
+/** 組み込みの標準イベント（spec §6 / §7）。createAnalytics で既定で利用可能。 */
+export interface StandardEvents {
+  page_view: NoProps;
+  click: { target_id: string };
+  widget_opened: NoProps;
+  flow_started: NoProps;
+  step_viewed: { step: number };
+  choice_selected: { step: number; choice_id: string };
+  recommendation_shown: { result_id: string; step_count?: number; elapsed_ms?: number };
+  recommendation_accepted: { result_id?: string };
+  recommendation_rejected: { result_id?: string };
+  flow_restarted: NoProps;
+  error_occurred: { message: string; stack?: string; fingerprint?: string; source?: string };
+  api_failed: { message: string; status?: number; source?: string; fingerprint?: string };
 }
 
 export interface ErrorOptions {

@@ -1,12 +1,31 @@
-import type { AnalyticsConfig, ErrorOptions, EventPayload, Transport, TrackOptions } from "./types";
+import type {
+  AnalyticsConfig,
+  ErrorOptions,
+  EventMap,
+  EventPayload,
+  StandardEvents,
+  Transport,
+} from "./types";
 import { DomTransport } from "./transport";
 import { Backoff } from "./backoff";
 
-export type { AnalyticsConfig, TrackOptions, ErrorOptions, EventPayload, Transport, PostResult } from "./types";
+export type {
+  AnalyticsConfig,
+  ErrorOptions,
+  EventPayload,
+  EventMap,
+  EventProps,
+  StandardEvents,
+  Transport,
+  PostResult,
+} from "./types";
 export { DomTransport } from "./transport";
 
 const DEFAULT_MAX_BATCH = 20;
 const DEFAULT_FLUSH_MS = 5000;
+
+// /errors へ即時送信するイベント（§17.5）
+const ERROR_EVENTS = new Set(["error_occurred", "api_failed"]);
 
 function nowMs(): number {
   return Date.now();
@@ -36,9 +55,9 @@ function currentPath(): string | undefined {
 }
 
 /**
- * frontping アナリティクスクライアント。
- * - イベントはキューに溜め、5秒間隔・離脱時に flush（§17.5）
- * - エラーは即時送信（§17.5）
+ * frontping アナリティクスクライアント（低レベル）。通常は createAnalytics を使う。
+ * - 通常イベントはキューに溜め、5秒間隔・離脱時に flush（§17.5）
+ * - error_occurred / api_failed は即時送信（§17.5）
  * - 429 を受けたら Retry-After の間は送信停止しイベントを破棄（リトライしない, §17.6）
  */
 export class Frontping {
@@ -66,44 +85,32 @@ export class Frontping {
     this.registerUnload();
   }
 
-  /** 任意イベントを送る（許可イベント名は Worker 側で検証） */
-  track(eventName: string, opts: TrackOptions = {}): void {
-    this.enqueue(this.build(eventName, opts));
-  }
-
-  /** 複数イベントをまとめてキューに積む */
-  trackBatch(events: Array<{ eventName: string } & TrackOptions>): void {
-    for (const e of events) {
-      const { eventName, ...opts } = e;
-      this.enqueue(this.build(eventName, opts));
-    }
+  /** イベントを送る。error 系は即時、それ以外はバッチ。 */
+  track(eventName: string, props: Record<string, unknown> = {}): void {
+    this.dispatch(eventName, props);
   }
 
   trackPageView(pagePath?: string): void {
-    this.track("page_view", { pagePath });
+    this.dispatch("page_view", {}, pagePath);
   }
 
   trackClick(targetId: string, pagePath?: string): void {
-    this.track("click", { pagePath, properties: { target_id: targetId } });
+    this.dispatch("click", { target_id: targetId }, pagePath);
   }
 
   /** エラーは即時送信（/errors）。429 中は破棄。 */
   trackError(message: string, opts: ErrorOptions = {}): void {
-    if (this.backoff.paused()) {
-      this.dropped++;
-      return;
-    }
-    const payload = this.build("error_occurred", {
-      pagePath: opts.pagePath,
-      properties: {
+    this.dispatch(
+      "error_occurred",
+      {
         message,
         ...(opts.stack ? { stack: opts.stack } : {}),
         ...(opts.source ? { source: opts.source } : {}),
         ...(opts.fingerprint ? { fingerprint: opts.fingerprint } : {}),
         ...(opts.properties ?? {}),
       },
-    });
-    void this.send(`${this.cfg.endpoint}/errors`, JSON.stringify(payload));
+      opts.pagePath
+    );
   }
 
   /** キューを即時 flush（手動）。完了を待ちたい場合は await できる。 */
@@ -126,20 +133,31 @@ export class Frontping {
 
   // ---- 内部 ----
 
-  private build(eventName: string, opts: TrackOptions): EventPayload {
-    const widgetId = opts.widgetId ?? this.cfg.widgetId;
-    const flowVersion = opts.flowVersion ?? this.cfg.flowVersion;
+  private dispatch(eventName: string, props: Record<string, unknown>, pageOverride?: string): void {
+    if (ERROR_EVENTS.has(eventName)) {
+      // §17.5 エラーは即時送信
+      if (this.backoff.paused()) {
+        this.dropped++;
+        return;
+      }
+      void this.send(`${this.cfg.endpoint}/errors`, JSON.stringify(this.build(eventName, props, pageOverride)));
+      return;
+    }
+    this.enqueue(this.build(eventName, props, pageOverride));
+  }
+
+  private build(eventName: string, props: Record<string, unknown>, pageOverride?: string): EventPayload {
     const payload: EventPayload = {
       app_id: this.cfg.appId,
       event_name: eventName,
       session_id: this.sessionId,
-      occurred_at: opts.occurredAt ?? new Date().toISOString(),
+      occurred_at: new Date().toISOString(),
     };
-    const pagePath = stripPath(opts.pagePath) ?? currentPath();
+    const pagePath = pageOverride !== undefined ? stripPath(pageOverride) : currentPath();
     if (pagePath != null) payload.page_path = pagePath;
-    if (widgetId != null) payload.widget_id = widgetId;
-    if (flowVersion != null) payload.flow_version = flowVersion;
-    if (opts.properties) payload.properties = opts.properties;
+    if (this.cfg.widgetId != null) payload.widget_id = this.cfg.widgetId;
+    if (this.cfg.flowVersion != null) payload.flow_version = this.cfg.flowVersion;
+    if (Object.keys(props).length > 0) payload.properties = props;
     return payload;
   }
 
@@ -209,63 +227,52 @@ export class Frontping {
   }
 }
 
-/** 型付きラッパー付きのアナリティクスを生成する（§17.1） */
-export function createAnalytics(config: AnalyticsConfig) {
-  const fp = new Frontping(config);
-  return {
-    core: fp,
-    track: fp.track.bind(fp),
-    trackBatch: fp.trackBatch.bind(fp),
-    trackPageView: fp.trackPageView.bind(fp),
-    trackClick: fp.trackClick.bind(fp),
-    trackError: fp.trackError.bind(fp),
-    flush: fp.flush.bind(fp),
-    destroy: fp.destroy.bind(fp),
+// props が「全て任意 or 空」のとき第2引数を省略可能にする
+type TrackArgs<P> = Record<string, never> extends P ? [props?: P] : [props: P];
 
-    // --- アプリ固有イベントの型付きラッパー ---
-    widgetOpened: (a: { widgetId?: string; flowVersion?: string } = {}) =>
-      fp.track("widget_opened", a),
-    flowStarted: (a: { widgetId?: string; flowVersion?: string } = {}) =>
-      fp.track("flow_started", a),
-    stepViewed: (a: { step: number; widgetId?: string; flowVersion?: string }) =>
-      fp.track("step_viewed", { widgetId: a.widgetId, flowVersion: a.flowVersion, properties: { step: a.step } }),
-    choiceSelected: (a: { step: number; choiceId: string; widgetId?: string; flowVersion?: string }) =>
-      fp.track("choice_selected", {
-        widgetId: a.widgetId,
-        flowVersion: a.flowVersion,
-        properties: { step: a.step, choice_id: a.choiceId },
-      }),
-    recommendationShown: (a: {
-      resultId: string;
-      stepCount?: number;
-      elapsedMs?: number;
-      widgetId?: string;
-      flowVersion?: string;
-    }) =>
-      fp.track("recommendation_shown", {
-        widgetId: a.widgetId,
-        flowVersion: a.flowVersion,
-        properties: {
-          result_id: a.resultId,
-          ...(a.stepCount != null ? { step_count: a.stepCount } : {}),
-          ...(a.elapsedMs != null ? { elapsed_ms: a.elapsedMs } : {}),
-        },
-      }),
-    recommendationAccepted: (a: { resultId?: string; widgetId?: string; flowVersion?: string } = {}) =>
-      fp.track("recommendation_accepted", {
-        widgetId: a.widgetId,
-        flowVersion: a.flowVersion,
-        properties: a.resultId ? { result_id: a.resultId } : {},
-      }),
-    recommendationRejected: (a: { resultId?: string; widgetId?: string; flowVersion?: string } = {}) =>
-      fp.track("recommendation_rejected", {
-        widgetId: a.widgetId,
-        flowVersion: a.flowVersion,
-        properties: a.resultId ? { result_id: a.resultId } : {},
-      }),
-    flowRestarted: (a: { widgetId?: string; flowVersion?: string } = {}) =>
-      fp.track("flow_restarted", a),
-  };
+/**
+ * 型付きアナリティクス。イベント名と properties が型 E でチェックされる。
+ * イベントごとに関数を増やす必要はない（track 1本で済む）。
+ */
+export interface Analytics<E> {
+  /** イベント送信。name と props が E で型チェックされる。 */
+  track<K extends keyof E>(name: K, ...args: TrackArgs<E[K]>): void;
+  trackPageView(pagePath?: string): void;
+  trackClick(targetId: string, pagePath?: string): void;
+  trackError(message: string, opts?: ErrorOptions): void;
+  flush(): Promise<void>;
+  destroy(): void;
+  droppedCount(): number;
+  /** 低レベル実体（エスケープハッチ） */
+  readonly core: Frontping;
 }
 
-export type Analytics = ReturnType<typeof createAnalytics>;
+/**
+ * アナリティクスを生成する（§17.1）。
+ *
+ * 標準イベントは型なしで使える:
+ *   const a = createAnalytics({ endpoint, appId, widgetId, flowVersion });
+ *   a.track("choice_selected", { step: 1, choice_id: "budget_low" });
+ *
+ * アプリ固有イベントは型マップを1つ渡すだけ（関数追加不要）:
+ *   type MyEvents = { coffee_purchased: { sku: string; price: number } };
+ *   const a = createAnalytics<MyEvents>({ ... });
+ *   a.track("coffee_purchased", { sku: "drip_01", price: 1200 });
+ */
+export function createAnalytics<E = Record<string, never>>(
+  config: AnalyticsConfig
+): Analytics<StandardEvents & E> {
+  const fp = new Frontping(config);
+  return {
+    track<K extends keyof (StandardEvents & E)>(name: K, ...args: TrackArgs<(StandardEvents & E)[K]>): void {
+      fp.track(name as string, (args[0] ?? {}) as Record<string, unknown>);
+    },
+    trackPageView: (p?: string) => fp.trackPageView(p),
+    trackClick: (id: string, p?: string) => fp.trackClick(id, p),
+    trackError: (m: string, o?: ErrorOptions) => fp.trackError(m, o),
+    flush: () => fp.flush(),
+    destroy: () => fp.destroy(),
+    droppedCount: () => fp.droppedCount(),
+    core: fp,
+  };
+}

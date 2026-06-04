@@ -2,15 +2,15 @@
 
 [English](./README.md) | 日本語
 
-小規模フロントエンド向けの軽量解析/エラー通知基盤（Cloudflare Workers + D1）。
-仕様は [docs/spec.md](./docs/spec.md) を参照。
+小規模フロントエンド向けの軽量解析/エラー通知基盤（Cloudflare Workers + D1）です。
+仕様は [docs/spec.md](./docs/spec.md) を参照してください。
 
 ## 構成
 
 ```
-docs/spec.md   仕様書（ポリシー・データモデル・API・運用方針）
 worker/        収集 Worker（Hono + D1 + KV + R2）
 sdk/           フロントエンド SDK（依存ゼロ・TypeScript）
+docs/spec.md   仕様書（ポリシー・データモデル・API・運用方針）
 ```
 
 ## Worker
@@ -53,18 +53,30 @@ const analytics = createAnalytics({
 analytics.trackPageView();
 analytics.trackClick("start_button");
 
-// ウィジェットフロー（型付きラッパー）
-analytics.widgetOpened();
-analytics.flowStarted();
-analytics.stepViewed({ step: 1 });
-analytics.choiceSelected({ step: 1, choiceId: "budget_low" });
-analytics.recommendationShown({ resultId: "plan_basic", stepCount: 4, elapsedMs: 8200 });
-analytics.recommendationAccepted({ resultId: "plan_basic" });
+// 標準イベントは型付き済み。track() 1本で送れ、イベントごとの関数は不要
+analytics.track("widget_opened");
+analytics.track("flow_started");
+analytics.track("step_viewed", { step: 1 });
+analytics.track("choice_selected", { step: 1, choice_id: "budget_low" });
+analytics.track("recommendation_shown", { result_id: "plan_basic", step_count: 4, elapsed_ms: 8200 });
+analytics.track("recommendation_accepted", { result_id: "plan_basic" });
 
 // エラー（即時送信）
 window.addEventListener("error", (e) => {
   analytics.trackError(e.message, { stack: e.error?.stack, source: e.filename });
 });
+```
+
+アプリ固有イベントは関数を増やさず、型マップを渡すだけ:
+
+```ts
+interface MyEvents {
+  coffee_purchased: { sku: string; price: number };
+}
+const analytics = createAnalytics<MyEvents>({ endpoint, appId: "shop" });
+
+analytics.track("coffee_purchased", { sku: "drip_01", price: 1200 }); // 名前・属性とも型チェック
+analytics.track("page_view"); // 標準イベントも引き続き使える
 ```
 
 - session_id はタブ単位で自動生成（§17.2）

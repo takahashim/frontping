@@ -53,18 +53,30 @@ const analytics = createAnalytics({
 analytics.trackPageView();
 analytics.trackClick("start_button");
 
-// Widget flow (typed wrappers)
-analytics.widgetOpened();
-analytics.flowStarted();
-analytics.stepViewed({ step: 1 });
-analytics.choiceSelected({ step: 1, choiceId: "budget_low" });
-analytics.recommendationShown({ resultId: "plan_basic", stepCount: 4, elapsedMs: 8200 });
-analytics.recommendationAccepted({ resultId: "plan_basic" });
+// Standard events are typed out of the box — one track(), no per-event functions
+analytics.track("widget_opened");
+analytics.track("flow_started");
+analytics.track("step_viewed", { step: 1 });
+analytics.track("choice_selected", { step: 1, choice_id: "budget_low" });
+analytics.track("recommendation_shown", { result_id: "plan_basic", step_count: 4, elapsed_ms: 8200 });
+analytics.track("recommendation_accepted", { result_id: "plan_basic" });
 
 // Errors (sent immediately)
 window.addEventListener("error", (e) => {
   analytics.trackError(e.message, { stack: e.error?.stack, source: e.filename });
 });
+```
+
+App-specific events need no extra functions — just pass a type map:
+
+```ts
+interface MyEvents {
+  coffee_purchased: { sku: string; price: number };
+}
+const analytics = createAnalytics<MyEvents>({ endpoint, appId: "shop" });
+
+analytics.track("coffee_purchased", { sku: "drip_01", price: 1200 }); // name & props type-checked
+analytics.track("page_view"); // standard events still available
 ```
 
 - `session_id` is generated automatically per tab (§17.2)

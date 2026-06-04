@@ -95,10 +95,10 @@ describe("batching (§17.5)", () => {
   });
 });
 
-describe("typed wrappers (§17.1)", () => {
-  it("choiceSelected builds correct properties", () => {
+describe("typed track (§17.1)", () => {
+  it("choice_selected: props go to properties, widget/flow from config", () => {
     const a = createAnalytics({ endpoint: ENDPOINT, appId: "app1", widgetId: "main", flowVersion: "v1" });
-    a.choiceSelected({ step: 2, choiceId: "budget_low" });
+    a.track("choice_selected", { step: 2, choice_id: "budget_low" });
     a.flush();
     const ev = calls[0]!.body.events[0];
     expect(ev.event_name).toBe("choice_selected");
@@ -108,12 +108,26 @@ describe("typed wrappers (§17.1)", () => {
     a.destroy();
   });
 
-  it("recommendationShown includes result_id", () => {
+  it("recommendation_shown includes result_id", () => {
     const a = createAnalytics({ endpoint: ENDPOINT, appId: "app1", widgetId: "main", flowVersion: "v1" });
-    a.recommendationShown({ resultId: "plan_basic", stepCount: 4, elapsedMs: 8200 });
+    a.track("recommendation_shown", { result_id: "plan_basic", step_count: 4, elapsed_ms: 8200 });
     a.flush();
     const ev = calls[0]!.body.events[0];
     expect(ev.properties).toEqual({ result_id: "plan_basic", step_count: 4, elapsed_ms: 8200 });
+    a.destroy();
+  });
+
+  it("custom events via a type map need no extra function", () => {
+    interface MyEvents {
+      coffee_purchased: { sku: string; price: number };
+    }
+    const a = createAnalytics<MyEvents>({ endpoint: ENDPOINT, appId: "app1" });
+    a.track("coffee_purchased", { sku: "drip_01", price: 1200 });
+    a.track("page_view"); // 標準イベントも引き続き使える
+    a.flush();
+    const ev = calls[0]!.body.events[0];
+    expect(ev.event_name).toBe("coffee_purchased");
+    expect(ev.properties).toEqual({ sku: "drip_01", price: 1200 });
     a.destroy();
   });
 });
@@ -135,13 +149,13 @@ describe("429 backoff (§17.6)", () => {
     nextStatus = 429;
     nextRetryAfter = "30";
     const a = new Frontping({ endpoint: ENDPOINT, appId: "app1" });
-    a.track("page_view", { pagePath: "/1" });
+    a.trackPageView("/1");
     await a.flush(); // 429 を受信し pauseUntil を設定
     expect(calls).toHaveLength(1);
 
     // 停止中: 新規イベントは送られず破棄される
     nextStatus = 202;
-    a.track("page_view", { pagePath: "/2" });
+    a.trackPageView("/2");
     await a.flush();
     expect(calls).toHaveLength(1); // 増えない
     expect(a.droppedCount()).toBeGreaterThan(0);
@@ -152,13 +166,13 @@ describe("429 backoff (§17.6)", () => {
     nextStatus = 429;
     nextRetryAfter = "30";
     const a = new Frontping({ endpoint: ENDPOINT, appId: "app1" });
-    a.track("page_view", { pagePath: "/1" });
+    a.trackPageView("/1");
     await a.flush();
 
     // 30秒経過後は再開
     vi.advanceTimersByTime(31_000);
     nextStatus = 202;
-    a.track("page_view", { pagePath: "/2" });
+    a.trackPageView("/2");
     await a.flush();
     expect(calls.length).toBeGreaterThanOrEqual(2);
     a.destroy();
@@ -180,7 +194,7 @@ describe("beacon on unload (§17.4)", () => {
     });
 
     const a = new Frontping({ endpoint: ENDPOINT, appId: "app1" });
-    a.track("page_view", { pagePath: "/1" });
+    a.trackPageView("/1");
     visState = "hidden";
     listeners["visibilitychange"]?.();
 
@@ -220,9 +234,9 @@ describe("injectable transport (#1)", () => {
       beacon: vi.fn(() => true),
     };
     const a = new Frontping({ endpoint: ENDPOINT, appId: "app1", transport });
-    a.track("page_view", { pagePath: "/1" });
+    a.trackPageView("/1");
     await a.flush();
-    a.track("page_view", { pagePath: "/2" });
+    a.trackPageView("/2");
     await a.flush();
 
     expect(transport.post).toHaveBeenCalledTimes(1); // 停止中は送られない
