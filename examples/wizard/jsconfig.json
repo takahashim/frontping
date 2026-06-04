@@ -8,7 +8,7 @@
     "noEmit": true,
     "strict": true,
     "paths": {
-      "/sdk.js": ["../../sdk/src/index.ts"]
+      "@frontping/sdk": ["../../sdk/src/index.ts"]
     }
   },
   "include": ["app.js"]

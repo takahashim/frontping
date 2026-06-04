@@ -41,6 +41,12 @@
     <button class="ghost" id="errbtn" title="エラーイベントを frontping に送るデモ">デモエラーを送信</button>
   </footer>
 </div>
-<script type="module" src="/app.js"></script>
+<!-- endpoint 注入（ローカルは serve.mjs が、Pages は CI が生成。無ければ UI のみ） -->
+<script src="./config.js"></script>
+<!-- SDK を相対パスで解決（GitHub Pages のサブパス配信でも壊れない） -->
+<script type="importmap">
+  { "imports": { "@frontping/sdk": "./sdk.js" } }
+</script>
+<script type="module" src="./app.js"></script>
 </body>
 </html>

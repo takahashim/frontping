@@ -36,6 +36,14 @@ const server = createServer(async (req, res) => {
       return;
     }
 
+    // endpoint 注入（ローカル既定はローカル Worker。WIZARD_ENDPOINT で上書き可）
+    if (path === "/config.js") {
+      const endpoint = process.env.WIZARD_ENDPOINT ?? "http://localhost:8787";
+      res.writeHead(200, { "content-type": TYPES[".js"], "cache-control": "no-store" });
+      res.end(`window.FRONTPING_ENDPOINT = ${JSON.stringify(endpoint)};\n`);
+      return;
+    }
+
     // ディレクトリトラバーサル防止
     const safe = normalize(path).replace(/^(\.\.[/\\])+/, "");
     const file = join(here, safe);

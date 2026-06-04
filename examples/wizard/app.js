@@ -1,15 +1,21 @@
-import { createAnalytics } from "/sdk.js";
+import { createAnalytics } from "@frontping/sdk";
 
 // --- frontping 設定 ---
-// endpoint はクエリで上書き可能: ?endpoint=http://localhost:8788
-const ENDPOINT = new URLSearchParams(location.search).get("endpoint") || "http://localhost:8787";
+// endpoint 解決の優先順位: ?endpoint= > config.js の window.FRONTPING_ENDPOINT > なし
+// なし（空）の場合は no-op transport で「UI のみ（送信しない）」になる。
+const injected = /** @type {{ FRONTPING_ENDPOINT?: string }} */ (window);
+const ENDPOINT = new URLSearchParams(location.search).get("endpoint") || injected.FRONTPING_ENDPOINT || "";
 
-// createAnalytics は型付き。analytics は Analytics 型に推論される（jsconfig.json で /sdk.js を解決）
+/** @type {import("@frontping/sdk").Transport | undefined} */
+const noopTransport = ENDPOINT ? undefined : { post: async () => null, beacon: () => true };
+
+// createAnalytics は型付き。analytics は Analytics 型に推論される（jsconfig.json で解決）
 const analytics = createAnalytics({
-  endpoint: ENDPOINT,
+  endpoint: ENDPOINT || "https://frontping.invalid",
   appId: "wizard_demo",
   widgetId: "coffee",
   flowVersion: "2026-06-02",
+  transport: noopTransport,
 });
 
 /** id 必須の要素取得（null を排除して型を HTMLElement に） */
@@ -126,7 +132,7 @@ function start() {
   startedAt = Date.now();
   thread.innerHTML = "";
   addBot("こんにちは！ ☕ いくつか質問して、あなたにぴったりのコーヒーの淹れ方を提案します。");
-  analytics.flowStarted();
+  analytics.track("flow_started");
   bumpSent("flow_started");
   showStep(0);
 }
@@ -135,7 +141,7 @@ function showStep(/** @type {number} */ i) {
   const step = STEPS[i];
   const stepNo = i + 1;
   addBot(step.prompt);
-  analytics.stepViewed({ step: stepNo });
+  analytics.track("step_viewed", { step: stepNo });
   bumpSent(`step_viewed ${stepNo}`);
   setChoices(
     step.choices.map((c) => ({
@@ -143,7 +149,7 @@ function showStep(/** @type {number} */ i) {
       onClick: () => {
         addMe(c.label);
         answers[i] = c.id;
-        analytics.choiceSelected({ step: stepNo, choiceId: c.id });
+        analytics.track("choice_selected", { step: stepNo, choice_id: c.id });
         bumpSent(`choice ${c.id}`);
         if (i + 1 < STEPS.length) showStep(i + 1);
         else showResult();
@@ -163,7 +169,7 @@ function showResult() {
   thread.appendChild(card);
   scroll();
 
-  analytics.recommendationShown({ resultId, stepCount: STEPS.length, elapsedMs });
+  analytics.track("recommendation_shown", { result_id: resultId, step_count: STEPS.length, elapsed_ms: elapsedMs });
   bumpSent(`recommendation_shown ${resultId}`);
 
   setChoices([
@@ -172,7 +178,7 @@ function showResult() {
       primary: true,
       onClick: () => {
         addMe("これにする 👍");
-        analytics.recommendationAccepted({ resultId });
+        analytics.track("recommendation_accepted", { result_id: resultId });
         bumpSent("recommendation_accepted");
         addBot("ありがとうございます！ よいコーヒーライフを ☕");
         setChoices([{ label: "もう一度診断する", ghost: true, onClick: restart }]);
@@ -182,7 +188,7 @@ function showResult() {
       label: "うーん、ちがうかも 👎",
       onClick: () => {
         addMe("うーん、ちがうかも 👎");
-        analytics.recommendationRejected({ resultId });
+        analytics.track("recommendation_rejected", { result_id: resultId });
         bumpSent("recommendation_rejected");
         addBot("了解です。条件を変えてもう一度試してみましょう。");
         setChoices([{ label: "もう一度診断する", ghost: true, onClick: restart }]);
@@ -192,7 +198,7 @@ function showResult() {
 }
 
 function restart() {
-  analytics.flowRestarted();
+  analytics.track("flow_restarted");
   bumpSent("flow_restarted");
   start();
 }
@@ -215,6 +221,6 @@ window.addEventListener("error", (ev) => {
 
 // --- 起動時イベント（§6）---
 analytics.trackPageView();
-analytics.widgetOpened();
+analytics.track("widget_opened");
 bumpSent("page_view + widget_opened");
 start();

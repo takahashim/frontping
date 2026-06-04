@@ -1,6 +1,10 @@
 # --- Dependencies ---
 node_modules/
 
+# --- examples/wizard のビルド/注入成果物（CI または serve.mjs が生成） ---
+examples/wizard/sdk.js
+examples/wizard/config.js
+
 # --- Cloudflare / Wrangler ---
 .wrangler/
 .dev.vars
