@@ -11,8 +11,8 @@ import { checkCapacity } from "./lib/capacity";
 import { exportPreviousMonth } from "./db/exporter";
 import { getAllConfigs } from "./lib/config";
 import { notifyOps } from "./lib/notify";
-import { githubAuthEnabled, getSession, startLogin, handleCallback, logout } from "./routes/oauth";
-import { DASHBOARD_HTML } from "./dashboard";
+import { handleCallback, logout } from "./routes/oauth";
+import { getDashboard } from "./routes/dashboard";
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -35,11 +35,8 @@ app.get("/metrics/errors", (c) => getErrors(c));
 // §20.1 手動 export（管理API）
 app.post("/admin/export", (c) => postExport(c));
 
-// §18.1 最小ダッシュボード。GitHub ログイン有効時は未ログインを認可画面へ。
-app.get("/dashboard", async (c) => {
-  if (githubAuthEnabled(c.env) && !(await getSession(c))) return startLogin(c);
-  return c.html(DASHBOARD_HTML, 200, { "Cache-Control": "no-store", "X-Robots-Tag": "noindex" });
-});
+// §18.1 ダッシュボード
+app.get("/dashboard", (c) => getDashboard(c));
 app.get("/dashboard/callback", (c) => handleCallback(c));
 app.get("/dashboard/logout", (c) => logout(c));
 

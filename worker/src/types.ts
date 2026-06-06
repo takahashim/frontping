@@ -2,10 +2,13 @@
 
 export interface Env {
   DB: D1Database;
+  // rate limit / 総量カウンタ用 KV。加えて lib/session-token.ts が `gh_token:` プレフィクスで
+  // ログインセッションの GitHub access_token を間借り保管する（logout 時の grant revoke 用）。
   RL: KVNamespace;
   EXPORTS?: R2Bucket; // §20 月次 export 先（未設定なら export 無効）
   // vars
   APP_CONFIG: string; // JSON: Record<app_id, AppConfig>
+  APP_ENV?: "production" | "preview" | "development"; // 実行環境（wrangler.toml [vars]/[env.*.vars]）
   // secrets
   NOTIFY_WEBHOOK_URL?: string; // Slack/Discord webhook (§13.4)
   IP_HASH_SECRET?: string; // §14.3

@@ -6,6 +6,9 @@ export interface Session {
   exp: number; // 失効時刻（ms epoch）
 }
 
+// ログインセッションの寿命。Cookie の maxAge / payload.exp / 保持 token の KV TTL で共有する。
+export const SESSION_TTL_SEC = 7 * 24 * 60 * 60;
+
 function b64url(bytes: Uint8Array): string {
   let s = "";
   for (const b of bytes) s += String.fromCharCode(b);

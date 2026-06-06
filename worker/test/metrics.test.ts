@@ -23,8 +23,14 @@ function getMetrics(headers: Record<string, string> = {}): Promise<Response> {
 }
 
 describe("GET /metrics (§9.4)", () => {
-  it("401 without token", async () => {
+  it("401 without token (production)", async () => {
     expect((await getMetrics()).status).toBe(401);
+  });
+
+  it("200 without token when APP_ENV=development and OAuth is unset (dev bypass)", async () => {
+    env.APP_ENV = "development";
+    const res = await getMetrics();
+    expect(res.status).toBe(200);
   });
 
   it("403 for unknown app", async () => {

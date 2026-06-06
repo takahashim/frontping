@@ -35,7 +35,10 @@ crons = ["0 3 * * *", "0 * * * *", "0 4 1 * *"]
 #   secrets（`wrangler secret put` で投入）:
 #     METRICS_TOKENS    : {"app_id":"token", ...}  (§9.4)
 #     NOTIFY_WEBHOOK_URL : Slack/Discord webhook   (§13.4)
+# 実行環境。development はローカル開発（dev 用の認証省略を有効化）。
+# ローカルは .dev.vars の APP_ENV=development が [vars] を上書きする。
 [vars]
+APP_ENV = "production"
 APP_CONFIG = '''
 {
   "product_recommender": {

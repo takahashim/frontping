@@ -33,6 +33,7 @@ export default defineConfig({
         bindings: {
           TEST_MIGRATIONS: migrations,
           APP_CONFIG: TEST_APP_CONFIG,
+          APP_ENV: "production", // 既定は本番。dev バイパスを見るテストは env.APP_ENV を上書き
           NOTIFY_WEBHOOK_URL: "https://hooks.example.com/wh",
           SESSION_SECRET: "test-session-secret",
         },

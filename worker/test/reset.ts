@@ -16,6 +16,8 @@ const TABLES = [
 ];
 
 beforeEach(async () => {
+  // APP_ENV は production を既定に戻す（dev バイパスを見るテストが上書きした分の漏れ防止）。
+  env.APP_ENV = "production";
   await env.DB.batch(TABLES.map((t) => env.DB.prepare(`DELETE FROM ${t}`)));
   // KV（総量カウンタ）も掃除
   const { keys } = await env.RL.list();
