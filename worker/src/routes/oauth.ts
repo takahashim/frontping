@@ -3,8 +3,7 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { signSession, verifySession, SESSION_TTL_SEC, type Session } from "../lib/session";
 import { isDevEnv } from "../lib/local";
-import { rememberToken, getToken, forgetToken } from "../lib/session-token";
-import { LOGGED_OUT_HTML } from "../dashboard";
+import { loggedOutHtml } from "../dashboard";
 
 // ダッシュボードの GitHub OAuth ログイン。
 // 未設定環境（GITHUB_* / SESSION_SECRET なし）では無効＝従来どおりトークン認証で動作。
@@ -101,48 +100,22 @@ export async function handleCallback(c: Ctx): Promise<Response> {
     return c.html(`<p>${user.login} はこのダッシュボードへのアクセスを許可されていません。</p>`, 403);
   }
 
-  // logout 時の grant revoke 用に access_token を保持（セッション TTL で失効）。
-  await rememberToken(c.env, user.login, tok.access_token);
-
   const value = await signSession({ login: user.login, exp: Date.now() + SESSION_TTL_SEC * 1000 }, c.env.SESSION_SECRET!);
   setCookie(c, SESSION_COOKIE, value, { httpOnly: true, secure: true, sameSite: "Lax", path: "/", maxAge: SESSION_TTL_SEC });
   return c.redirect("/dashboard", 302);
 }
 
-// GitHub アプリの認可（grant）を取り消す。次回ログイン時に認可画面が再表示される。
-// （Basic 認証 client_id:client_secret ＋ body に access_token。§ GitHub REST: Apps > delete-an-app-authorization）
-async function revokeGitHubGrant(env: Env, accessToken: string): Promise<void> {
-  const basic = btoa(`${env.GITHUB_CLIENT_ID}:${env.GITHUB_CLIENT_SECRET}`);
-  await fetch(`https://api.github.com/applications/${env.GITHUB_CLIENT_ID}/grant`, {
-    method: "DELETE",
-    headers: {
-      Authorization: `Basic ${basic}`,
-      Accept: "application/vnd.github+json",
-      "User-Agent": "frontping",
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ access_token: accessToken }),
-  });
+// GitHub の OAuth App 連携管理ページ。ユーザーがここで連携解除（Revoke）できる。
+// CLIENT_ID があれば当該アプリへ直リンク、無ければ認可アプリ一覧へ。
+function githubConnectionUrl(env: Env): string {
+  return env.GITHUB_CLIENT_ID
+    ? `https://github.com/settings/connections/applications/${env.GITHUB_CLIENT_ID}`
+    : "https://github.com/settings/applications";
 }
 
-// セッションに紐づく GitHub 認可を破棄: 保持 token で grant を revoke し、token を消す。
-// revoke 失敗（既に失効・GitHub 障害など）でもローカルのログアウトは妨げない。
-async function endGitHubSession(env: Env, login: string): Promise<void> {
-  const token = await getToken(env, login);
-  if (!token) return;
-  try {
-    await revokeGitHubGrant(env, token);
-  } catch {
-    // ローカルセッション破棄は呼び出し側で別途必ず行う
-  }
-  await forgetToken(env, login);
-}
-
-export async function logout(c: Ctx): Promise<Response> {
-  const session = await getSession(c);
-  if (session) await endGitHubSession(c.env, session.login);
-  // set 時と同じ属性で Cookie 削除（path 一致が必須）。
+export function logout(c: Ctx): Response {
+  // frontping 側のセッションを破棄（set 時と同じ属性で削除。path 一致が必須）。
+  // GitHub の連携解除はこちらでは行わず、着地ページから GitHub の管理ページへ誘導する。
   deleteCookie(c, SESSION_COOKIE, { path: "/", secure: true, sameSite: "Lax" });
-  // /dashboard へ戻すと OAuth の SSO で即再ログインしてしまうため、明示的なログアウト画面を出す。
-  return c.html(LOGGED_OUT_HTML, 200, { "Cache-Control": "no-store" });
+  return c.html(loggedOutHtml(githubConnectionUrl(c.env)), 200, { "Cache-Control": "no-store" });
 }

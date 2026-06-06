@@ -2,9 +2,7 @@
 
 export interface Env {
   DB: D1Database;
-  // rate limit / 総量カウンタ用 KV。加えて lib/session-token.ts が `gh_token:` プレフィクスで
-  // ログインセッションの GitHub access_token を間借り保管する（logout 時の grant revoke 用）。
-  RL: KVNamespace;
+  RL: KVNamespace; // rate limit / 総量カウンタ用 KV
   EXPORTS?: R2Bucket; // §20 月次 export 先（未設定なら export 無効）
   // vars
   APP_CONFIG: string; // JSON: Record<app_id, AppConfig>

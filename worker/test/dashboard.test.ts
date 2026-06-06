@@ -1,7 +1,6 @@
 import { SELF, env } from "cloudflare:test";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect } from "vitest";
 import { githubOAuthStatus } from "../src/routes/oauth";
-import { signSession } from "../src/lib/session";
 import type { Env } from "../src/types";
 
 describe("githubOAuthStatus (設定の完全性)", () => {
@@ -52,43 +51,19 @@ describe("GET /dashboard (§18.1)", () => {
   });
 });
 
-describe("GET /dashboard/logout (GitHub grant 取り消し)", () => {
-  afterEach(() => vi.unstubAllGlobals());
-
-  it("revokes the GitHub grant, clears the token, and shows the logged-out page", async () => {
-    // ログイン済み相当: 有効なセッション Cookie ＋ KV に access_token を保持
-    const cookie = await signSession({ login: "takahashim", exp: Date.now() + 60000 }, "test-session-secret");
-    await env.RL.put("gh_token:takahashim", "gho_secret_token");
-
-    // GitHub revoke 呼び出しを捕捉
-    const calls: Array<{ url: string; method?: string; body?: string }> = [];
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async (input: RequestInfo, init?: RequestInit) => {
-        calls.push({ url: String(input), method: init?.method, body: init?.body as string });
-        return new Response(null, { status: 204 });
-      })
-    );
-
+describe("GET /dashboard/logout (GitHub 連携解除へ誘導)", () => {
+  it("clears the session cookie and guides to GitHub's app connection page", async () => {
     const res = await SELF.fetch("https://worker.test/dashboard/logout", {
-      headers: { Cookie: `fp_session=${cookie}` },
+      headers: { Cookie: "fp_session=anything" },
     });
     expect(res.status).toBe(200);
-    expect(await res.text()).toContain("ログアウトしました");
-
-    // grant revoke が呼ばれ、保持トークンが渡る
-    const revoke = calls.find((c) => c.url.includes("/applications/") && c.url.endsWith("/grant"));
-    expect(revoke).toBeDefined();
-    expect(revoke!.method).toBe("DELETE");
-    expect(revoke!.body).toContain("gho_secret_token");
-
-    // KV のトークンは削除済み
-    expect(await env.RL.get("gh_token:takahashim")).toBeNull();
-  });
-
-  it("still shows the logged-out page when there is no session", async () => {
-    const res = await SELF.fetch("https://worker.test/dashboard/logout");
-    expect(res.status).toBe(200);
-    expect(await res.text()).toContain("ログアウトしました");
+    const html = await res.text();
+    // GitHub の連携管理ページへ誘導する文言・リンク
+    expect(html).toContain("GitHub で連携を解除する");
+    expect(html).toContain("github.com/settings/"); // CLIENT_ID 未設定時は一覧ページへフォールバック
+    // 「ログアウトしました」と言い切らない
+    expect(html).not.toContain("ログアウトしました");
+    // セッション Cookie を失効させる
+    expect(res.headers.get("Set-Cookie") ?? "").toContain("fp_session=");
   });
 });

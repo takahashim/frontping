@@ -20,18 +20,25 @@ pnpm exec wrangler secret put &lt;NAME&gt;</pre>
 </body></html>`;
 }
 
-// ログアウト後の着地ページ。/dashboard へ戻すと OAuth の SSO で即再ログインするため、
-// 明示的な「ログアウトしました」を出してループを断つ。再ログインはリンクから能動的に。
-export const LOGGED_OUT_HTML = `<!doctype html><html lang="ja"><head><meta charset="utf-8" />
+// logout 後の着地ページ。frontping のセッションは破棄済みだが、GitHub にログインしたままだと
+// SSO で再アクセスできてしまう。完全にログアウトするには GitHub 側で連携解除が必要、と案内し、
+// その管理ページ（connectionUrl）へ誘導する。「ログアウトしました」とは言い切らない。
+export function loggedOutHtml(connectionUrl: string): string {
+  return `<!doctype html><html lang="ja"><head><meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" /><title>frontping</title>
 <style>body{font:14px/1.7 system-ui,sans-serif;margin:0;padding:40px;max-width:640px}
-a{color:#2563eb}.muted{color:#888}</style></head><body>
-<h1>ログアウトしました</h1>
-<p class="muted">このダッシュボードのセッションを破棄し、GitHub アプリの認可も取り消しました。</p>
-<p><a href="/dashboard">再度ログイン</a></p>
-<p class="muted">次回ログイン時は GitHub の認可（許可）画面が再表示されます。<br>
+a{color:#2563eb}.muted{color:#888}
+.btn{display:inline-block;margin:8px 0;padding:9px 16px;border-radius:8px;background:#2563eb;color:#fff;text-decoration:none}</style>
+</head><body>
+<h1>GitHub 連携を解除してログアウトを完了してください</h1>
+<p>frontping のダッシュボードのセッションは破棄しました。ただし GitHub にログインしたままだと、
+連携が残っている限りこのダッシュボードへ再びアクセスできます。</p>
+<p>完全にログアウトするには、GitHub 側でこのアプリの連携を解除してください。</p>
+<p><a class="btn" href="${connectionUrl}">GitHub で連携を解除する</a></p>
+<p class="muted">連携を解除すると、次回アクセス時に GitHub の認可（許可）画面が再表示されます。<br>
 GitHub 自体のログインは解除されません（共有端末では GitHub 側もサインアウトしてください）。</p>
 </body></html>`;
+}
 
 export const DASHBOARD_HTML = `<!doctype html>
 <html lang="ja">
