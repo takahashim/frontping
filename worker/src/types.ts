@@ -9,6 +9,11 @@ export interface Env {
   // secrets
   NOTIFY_WEBHOOK_URL?: string; // Slack/Discord webhook (§13.4)
   IP_HASH_SECRET?: string; // §14.3
+  // ダッシュボードの GitHub OAuth ログイン（未設定なら無効＝トークン認証のみ）
+  GITHUB_CLIENT_ID?: string;
+  GITHUB_CLIENT_SECRET?: string;
+  SESSION_SECRET?: string; // セッション Cookie 署名用
+  ALLOWED_GITHUB_USERS?: string; // カンマ区切りの許可ユーザー名
 }
 
 export interface AppLimits {

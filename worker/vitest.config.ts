@@ -35,6 +35,7 @@ export default defineWorkersConfig({
             TEST_MIGRATIONS: migrations,
             APP_CONFIG: TEST_APP_CONFIG,
             NOTIFY_WEBHOOK_URL: "https://hooks.example.com/wh",
+            SESSION_SECRET: "test-session-secret",
           },
         },
       },

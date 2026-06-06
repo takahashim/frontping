@@ -55,10 +55,36 @@ pnpm exec wrangler secret put NOTIFY_WEBHOOK_URL
 pnpm exec wrangler secret put IP_HASH_SECRET
 ```
 
+## 4a. Dashboard を GitHub ログインで保護（§18.1）
+
+`/dashboard`・`/metrics`・`/admin` を GitHub OAuth でゲートする。**設定すると有効化**され、
+未設定なら従来どおりトークン認証のみで動く（後方互換）。
+
+1. GitHub で **OAuth App** を作成（Settings → Developer settings → OAuth Apps → New）:
+   - Homepage URL: `https://frontping.<sub>.workers.dev`
+   - **Authorization callback URL**: `https://frontping.<sub>.workers.dev/dashboard/callback`
+   - Client ID を控え、Client secret を生成。
+2. secret を投入:
+
+```bash
+pnpm exec wrangler secret put GITHUB_CLIENT_ID        # OAuth App の Client ID
+pnpm exec wrangler secret put GITHUB_CLIENT_SECRET    # OAuth App の Client secret
+pnpm exec wrangler secret put SESSION_SECRET          # 例: openssl rand -hex 32
+pnpm exec wrangler secret put ALLOWED_GITHUB_USERS    # 例: takahashim,foo,bar（カンマ区切り）
+```
+
+> **`ALLOWED_GITHUB_USERS` は必須**。fail-closed なので、未設定／一覧に無いユーザーは
+> 403 で拒否される（誰も入れない）。自分の GitHub ユーザー名を必ず入れる。
+
+有効化後はダッシュボードを開くと GitHub ログインへ。ログイン中は **token 欄は空でOK**
+（セッション Cookie で認可）。`/dashboard/logout` でログアウト。
+プログラムから `/metrics` を叩く場合は引き続き per-app トークン（下記）を使う。
+
 ## 4b. Issue metrics/admin tokens (§9.4)
 
-`/metrics`・`/dashboard`・`/admin` のトークンは **D1 の `metrics_tokens` に sha256 ハッシュで保存**する
+`/metrics`・`/admin` の **プログラム用**トークンは **D1 の `metrics_tokens` に sha256 ハッシュで保存**する
 （app ごとに独立。発行/失効が他 app に波及しない。平文は保存しない）。
+※ ダッシュボード（人間）は 4a の GitHub ログインで足りるので、トークンは外部連携が要るときだけ発行。
 
 ```bash
 pnpm run config:gen

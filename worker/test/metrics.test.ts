@@ -34,6 +34,20 @@ describe("GET /metrics (§9.4)", () => {
     expect(res.status).toBe(403);
   });
 
+  it("accepts a valid GitHub session cookie (no token)", async () => {
+    const { signSession } = await import("../src/lib/session");
+    const cookie = await signSession({ login: "takahashim", exp: Date.now() + 60000 }, "test-session-secret");
+    const res = await getMetrics({ Cookie: `fp_session=${cookie}` });
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects a tampered session cookie", async () => {
+    const { signSession } = await import("../src/lib/session");
+    const cookie = await signSession({ login: "x", exp: Date.now() + 60000 }, "wrong-secret");
+    const res = await getMetrics({ Cookie: `fp_session=${cookie}` });
+    expect(res.status).toBe(401);
+  });
+
   it("returns event counts and null rates when no sessions", async () => {
     await seedMetricsToken("test_app", "test-token");
     await postEvent({ event_name: "page_view" });

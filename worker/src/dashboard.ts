@@ -37,8 +37,9 @@ export const DASHBOARD_HTML = `<!doctype html>
   <label>app_id<input id="app" placeholder="product_recommender" required /></label>
   <label>from<input id="from" type="date" /></label>
   <label>to<input id="to" type="date" /></label>
-  <label>token<input id="token" type="password" placeholder="metrics token" required /></label>
+  <label>token<input id="token" type="password" placeholder="GitHub ログイン中は空でOK" /></label>
   <button id="go" type="submit">Load</button>
+  <a href="/dashboard/logout" class="muted" style="align-self:center">logout</a>
 </form>
 <div id="msg" class="err"></div>
 <div id="out" class="cards"></div>
@@ -125,9 +126,12 @@ export const DASHBOARD_HTML = `<!doctype html>
     el.appendChild(ax);
   }
 
+  // token があれば Bearer、無ければ Cookie（GitHub セッション）に任せる
+  function authHeaders(token) { return token ? { Authorization: "Bearer " + token } : {}; }
+
   function loadChart(app, token, range, elId) {
     var q = new URLSearchParams({ app_id: app, range: range });
-    fetch("/metrics/timeseries?" + q.toString(), { headers: { Authorization: "Bearer " + token } })
+    fetch("/metrics/timeseries?" + q.toString(), { headers: authHeaders(token) })
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then(function (d) { renderChart(elId, d); })
       .catch(function (e) { $(elId).textContent = String(e); });
@@ -163,9 +167,9 @@ export const DASHBOARD_HTML = `<!doctype html>
     if ($("from").value) q.set("from", $("from").value);
     if ($("to").value) q.set("to", $("to").value);
 
-    fetch("/metrics?" + q.toString(), { headers: { Authorization: "Bearer " + token } })
+    fetch("/metrics?" + q.toString(), { headers: authHeaders(token) })
       .then(function (r) {
-        if (!r.ok) throw new Error("HTTP " + r.status + (r.status === 401 ? " (token 不正)" : ""));
+        if (!r.ok) throw new Error("HTTP " + r.status + (r.status === 401 ? " (未認証: GitHub ログインか token が必要)" : ""));
         return r.json();
       })
       .then(function (j) {
