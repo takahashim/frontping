@@ -88,7 +88,6 @@ export const DASHBOARD_HTML = `<!doctype html>
   <form id="range">
     <label>from<input id="from" type="date" /></label>
     <label>to<input id="to" type="date" /></label>
-    <label>token<input id="token" type="password" placeholder="GitHub ログイン中は空でOK" /></label>
     <button id="go" type="submit">更新</button>
   </form>
   <div id="msg" class="err"></div>
@@ -107,8 +106,7 @@ export const DASHBOARD_HTML = `<!doctype html>
   function pct(v) { return v == null ? "—" : (Math.round(v * 1000) / 10) + "%"; }
   function num(v) { return v == null ? "—" : Number(v).toLocaleString(); }
   function card(k, v) { return '<div class="card"><div class="v">' + v + '</div><div class="k">' + k + '</div></div>'; }
-  // token があれば Bearer、無ければ Cookie（GitHub セッション）に任せる
-  function authHeaders() { var t = sessionStorage.getItem("fp_token"); return t ? { Authorization: "Bearer " + t } : {}; }
+  // 認証は同一オリジンの Cookie（GitHub セッション）に任せる。ローカル開発は dev バイパス。
 
   // ---- チャート描画 ----
   var SVGNS = "http://www.w3.org/2000/svg";
@@ -153,7 +151,7 @@ export const DASHBOARD_HTML = `<!doctype html>
   }
   function loadChart(app, range, elId) {
     var q = new URLSearchParams({ app_id: app, range: range });
-    fetch("/metrics/timeseries?" + q.toString(), { headers: authHeaders() })
+    fetch("/metrics/timeseries?" + q.toString())
       .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
       .then(function (d) { renderChart(elId, d); })
       .catch(function (e) { $(elId).textContent = String(e); });
@@ -174,15 +172,14 @@ export const DASHBOARD_HTML = `<!doctype html>
   function loadDetail(app) {
     current = app;
     $("title").textContent = app;
-    $("token").value = sessionStorage.getItem("fp_token") || "";
     $("msg").textContent = "";
     $("out").innerHTML = '<span class="muted">loading…</span>';
     var q = new URLSearchParams({ app_id: app });
     if ($("from").value) q.set("from", $("from").value);
     if ($("to").value) q.set("to", $("to").value);
-    fetch("/metrics?" + q.toString(), { headers: authHeaders() })
+    fetch("/metrics?" + q.toString())
       .then(function (r) {
-        if (!r.ok) throw new Error("HTTP " + r.status + (r.status === 401 ? " (未認証: GitHub ログインか token が必要)" : ""));
+        if (!r.ok) throw new Error("HTTP " + r.status + (r.status === 401 ? " (未認証: GitHub ログインが必要)" : ""));
         return r.json();
       })
       .then(function (j) { renderSummary(j.summary); loadChart(app, "24h", "c24"); loadChart(app, "30d", "c30"); })
@@ -211,11 +208,9 @@ export const DASHBOARD_HTML = `<!doctype html>
     else { show("list"); renderList(); }
   }
 
-  // 期間更新（＋token モードでは token を保存して再取得）
+  // 期間更新
   $("range").addEventListener("submit", function (e) {
     e.preventDefault();
-    var t = $("token").value.trim();
-    if (t) sessionStorage.setItem("fp_token", t); else sessionStorage.removeItem("fp_token");
     if (current) loadDetail(current);
   });
   $("back").addEventListener("click", function (e) { e.preventDefault(); location.hash = ""; });
