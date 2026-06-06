@@ -764,14 +764,11 @@ Response / Status は §9.1 と同じとし、成功時は **`202 Accepted`** �
 #### 認証
 
 `/metrics` は集計値とはいえ非公開情報である。  
-`POST /events` 系の Origin 制限とは別に、**管理用トークンによる認証を必須**とする。
+`POST /events` 系の Origin 制限とは別に、**運用者の認証を必須**とする。
 
-```text
-Authorization: Bearer <metrics_token>
-```
-
-トークンは `app_id` ごとに発行し、Worker の secret として保持する。  
-認証に失敗した場合は `401 Unauthorized` を返す。CORS の許可 Origin とは独立に扱う。
+閲覧は同梱ダッシュボードの **GitHub ログイン（セッション Cookie）** に一本化する。  
+認証に失敗した場合は `401 Unauthorized` を返す。CORS の許可 Origin とは独立に扱う。  
+（ローカル開発では `APP_ENV=development` かつ OAuth 未設定なら認証を省略できる。）
 
 Query parameters:
 
@@ -1001,7 +998,7 @@ avg_max_step = total_max_step / sessions
 集計は冪等にする。`session_summaries` を `day` 単位で全件再計算して該当行を置き換える方式とし、`raw_events` の保存期間内であればいつでも再生成できるようにする（§25.5）。  
 直近日のセッションは未確定（まだ更新されうる）ため、Cron では**前日以前を確定値、当日は暫定値**として扱う。
 
-更新は定期処理（Cron Triggers）または管理APIで行い、管理APIは §9.4 と同じトークン認証を必須とする。
+更新は定期処理（Cron Triggers）または管理APIで行い、管理APIは §9.4 と同じ運用者認証（GitHub セッション）を必須とする。
 
 ---
 
@@ -1411,7 +1408,7 @@ if (res.status === 429) {
     - リッチな BI/可視化、フィルタ UI、ダッシュボードの認証基盤統合、複数アプリの一覧管理画面。
     - これらは `GET /metrics` を叩く外部ツール（スプレッドシート連携・Grafana 等）で代替できることを前提とし、本システムは API の安定提供に責任を持つ。
 
-同梱ダッシュボードも §9.4 の `metrics_token` 認証を用いる。
+同梱ダッシュボードも §9.4 の認証（GitHub ログインのセッション Cookie）を用いる。
 
 ### 18.2 表示項目
 
@@ -1737,7 +1734,6 @@ BigQuery
     "https://www.example.com"
   ],
   "require_origin": true,
-  "metrics_token": "<secret>",
   "retention": {
     "raw_events_days": 30,
     "error_events_days": 90,
@@ -1757,7 +1753,7 @@ BigQuery
 }
 ```
 
-`metrics_token` は `/metrics` および管理API（§9.4 / §12.2 / §19.3）の認証に用いる secret であり、フロントエンドには配布しない。  
+`/metrics` および管理API（§9.4 / §12.2 / §19.3）は運用者の GitHub ログイン（セッション Cookie）で認証する。  
 `require_origin` は `Origin` ヘッダ欠如時の扱いを切り替える（§15.3）。  
 `limits` は総量上限（§16.2）、`warn_threshold_ratio` は逼迫アラートの警戒閾値（§16.4）、`capacity_dedupe_minutes` は逼迫アラートの抑制間隔（§13.3）である。
 

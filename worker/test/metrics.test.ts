@@ -1,6 +1,6 @@
 import { SELF, env } from "cloudflare:test";
 import { describe, it, expect } from "vitest";
-import { seedMetricsToken } from "./helpers";
+import { sessionAuth } from "./helpers";
 
 const ORIGIN = "https://app.example.com";
 
@@ -23,27 +23,25 @@ function getMetrics(headers: Record<string, string> = {}): Promise<Response> {
 }
 
 describe("GET /metrics (§9.4)", () => {
-  it("401 without token (production)", async () => {
+  it("401 without auth (production)", async () => {
     expect((await getMetrics()).status).toBe(401);
   });
 
-  it("200 without token when APP_ENV=development and OAuth is unset (dev bypass)", async () => {
+  it("200 without auth when APP_ENV=development and OAuth is unset (dev bypass)", async () => {
     env.APP_ENV = "development";
     const res = await getMetrics();
     expect(res.status).toBe(200);
   });
 
-  it("403 for unknown app", async () => {
+  it("403 for unknown app (even when authenticated)", async () => {
     const res = await SELF.fetch("https://worker.test/metrics?app_id=nope", {
-      headers: { Authorization: "Bearer test-token" },
+      headers: await sessionAuth(),
     });
     expect(res.status).toBe(403);
   });
 
-  it("accepts a valid GitHub session cookie (no token)", async () => {
-    const { signSession } = await import("../src/lib/session");
-    const cookie = await signSession({ login: "takahashim", exp: Date.now() + 60000 }, "test-session-secret");
-    const res = await getMetrics({ Cookie: `fp_session=${cookie}` });
+  it("accepts a valid GitHub session cookie", async () => {
+    const res = await getMetrics(await sessionAuth());
     expect(res.status).toBe(200);
   });
 
@@ -55,12 +53,11 @@ describe("GET /metrics (§9.4)", () => {
   });
 
   it("returns event counts and null rates when no sessions", async () => {
-    await seedMetricsToken("test_app", "test-token");
     await postEvent({ event_name: "page_view" });
     await postEvent({ event_name: "page_view" });
     await postEvent({ event_name: "click", properties: { target_id: "btn" } });
 
-    const res = await getMetrics({ Authorization: "Bearer test-token" });
+    const res = await getMetrics(await sessionAuth());
     expect(res.status).toBe(200);
     const json = (await res.json()) as { summary: Record<string, number | null> };
     expect(json.summary.page_views).toBe(2);
@@ -82,16 +79,15 @@ describe("GET /metrics/errors (エラー深刻度)", () => {
     ]);
   }
 
-  it("401 without token", async () => {
+  it("401 without auth", async () => {
     const res = await SELF.fetch("https://worker.test/metrics/errors?app_id=test_app");
     expect(res.status).toBe(401);
   });
 
   it("returns fingerprints ranked by hits with distinct source counts", async () => {
-    await seedMetricsToken("test_app", "test-token");
     await seedErrors();
     const res = await SELF.fetch("https://worker.test/metrics/errors?app_id=test_app", {
-      headers: { Authorization: "Bearer test-token" },
+      headers: await sessionAuth(),
     });
     expect(res.status).toBe(200);
     const j = (await res.json()) as { errors: Array<{ fingerprint: string; hits: number; sources: number }> };
@@ -108,17 +104,16 @@ describe("GET /metrics/timeseries (グラフ用)", () => {
     return SELF.fetch(`https://worker.test/metrics/timeseries?app_id=test_app&range=${range}`, { headers });
   }
 
-  it("401 without token", async () => {
+  it("401 without auth", async () => {
     expect((await ts("24h")).status).toBe(401);
   });
 
   it("24h: returns 288 five-minute buckets with counts", async () => {
-    await seedMetricsToken("test_app", "test-token");
     await postEvent({ event_name: "page_view" });
     await postEvent({ event_name: "page_view" });
     await postEvent({ event_name: "click", properties: { target_id: "b" } });
 
-    const res = await ts("24h", { Authorization: "Bearer test-token" });
+    const res = await ts("24h", await sessionAuth());
     expect(res.status).toBe(200);
     const j = (await res.json()) as { unit: string; buckets: string[]; series: Record<string, number[]> };
     expect(j.unit).toBe("5min");
@@ -133,9 +128,8 @@ describe("GET /metrics/timeseries (グラフ用)", () => {
   });
 
   it("30d: returns 30 daily buckets from daily_event_counts", async () => {
-    await seedMetricsToken("test_app", "test-token");
     await postEvent({ event_name: "page_view" });
-    const res = await ts("30d", { Authorization: "Bearer test-token" });
+    const res = await ts("30d", await sessionAuth());
     const j = (await res.json()) as { unit: string; buckets: string[]; series: Record<string, number[]> };
     expect(j.unit).toBe("day");
     expect(j.buckets).toHaveLength(30);

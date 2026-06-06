@@ -76,36 +76,10 @@ pnpm exec wrangler secret put ALLOWED_GITHUB_USERS    # 例: takahashim,foo,bar�
 > **`ALLOWED_GITHUB_USERS` は必須**。fail-closed なので、未設定／一覧に無いユーザーは
 > 403 で拒否される（誰も入れない）。自分の GitHub ユーザー名を必ず入れる。
 
-有効化後はダッシュボードを開くと GitHub ログインへ。ログイン中は **token 欄は空でOK**
-（セッション Cookie で認可）。`/dashboard/logout` でログアウト。
-プログラムから `/metrics` を叩く場合は引き続き per-app トークン（下記）を使う。
-
-## 4b. Issue metrics/admin tokens (§9.4)
-
-`/metrics`・`/admin` の **プログラム用**トークンは **D1 の `metrics_tokens` に sha256 ハッシュで保存**する
-（app ごとに独立。発行/失効が他 app に波及しない。平文は保存しない）。
-※ ダッシュボード（人間）は 4a の GitHub ログインで足りるので、トークンは外部連携が要るときだけ発行。
-
-```bash
-pnpm run config:gen
-# トークンを発行 → SQL をファイルに（token=平文は STDERR に1度だけ表示）
-# 注: `pnpm run` はヘッダ行を stdout に出すので node を直接呼ぶ
-node scripts/issue-token.mjs product_recommender > /tmp/fp-token.sql
-head -1 /tmp/fp-token.sql   # INSERT で始まることを確認
-# 本番 D1 に適用（--remote の確認プロンプトに答えられるよう --file で渡す）
-pnpm exec wrangler d1 execute frontping --remote --config wrangler.generated.toml --file /tmp/fp-token.sql
-```
-
-> パイプ + `--command "$(cat)"` は `--remote` の確認プロンプトで固まるため使わない。
-
-失効はその app の行を消すだけ（他に影響なし）:
-
-```bash
-pnpm exec wrangler d1 execute frontping --remote --config wrangler.generated.toml \
-  --command "DELETE FROM metrics_tokens WHERE app_id='product_recommender'"
-```
-
-ローカルは `--local`（`--config` 不要）で同様に。
+有効化後はダッシュボードを開くと GitHub ログインへ。ログイン中はセッション Cookie で認可され、
+`/metrics`・`/admin` は運用者セッションのみで閲覧・操作できる。`/dashboard/logout` でログアウト。
+（per-app の閲覧トークン認証は廃止。閲覧はダッシュボードの GitHub ログインに一本化。
+ローカル開発では `APP_ENV=development` ＋ OAuth 未設定なら認証を省略できる。）
 
 ## 5. Deploy
 
@@ -123,7 +97,7 @@ Cron Triggers (daily / hourly / monthly) are registered automatically from `[tri
 - Repository **Secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID` (for wrangler authentication)
 
 In CI these environment variables are used instead of `.env.deploy`, and `config:gen` injects the IDs the same way.
-Worker secrets such as `METRICS_TOKENS` use the values already set via `wrangler secret put` (step 4).
+Worker secrets such as `SESSION_SECRET` / `GITHUB_CLIENT_ID` use the values already set via `wrangler secret put` (step 4).
 
 ## 6. Verify
 
@@ -134,7 +108,7 @@ BASE=https://frontping.<subdomain>.workers.dev
 curl -s $BASE/health
 # => {"ok":true}
 
-# Dashboard (open in a browser). Enter app_id and token, then Load
+# Dashboard (open in a browser). Sign in with GitHub, then pick a service
 open $BASE/dashboard
 
 # A single event (the Origin must be in the app's allowed_origins)
@@ -146,13 +120,16 @@ curl -s -X POST $BASE/events \
 
 ## 7. Manual export (optional, for re-runs, §20.1)
 
+`/admin/export` is gated by the operator's GitHub session, so send the dashboard's
+`fp_session` cookie (copy it from your logged-in browser):
+
 ```bash
 curl -s -X POST "$BASE/admin/export?app_id=product_recommender&year=2026&month=5" \
-  -H "Authorization: Bearer <metrics token>"
+  -H "Cookie: fp_session=<your dashboard session cookie>"
 ```
 
 ## Notes
 
 - The monthly export runs at `0 4 1 * *` (UTC) for the previous month.
 - Capacity alerts, retention, and daily_session_metrics recomputation also run automatically via Cron (§19.4).
-- Configuration changes (origins / limits / token) take effect via redeploy or `wrangler secret put` (static configuration).
+- Configuration changes (origins / limits) take effect via redeploy or `wrangler secret put` (static configuration).

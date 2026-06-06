@@ -1,5 +1,6 @@
 import { defineConfig } from "vitest/config";
 import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
+import { TEST_SESSION_SECRET } from "./test/constants";
 
 // マイグレーションを読み込み、テスト用 D1 に適用する（test/apply-migrations.ts）
 const migrations = await readD1Migrations("./migrations");
@@ -35,7 +36,7 @@ export default defineConfig({
           APP_CONFIG: TEST_APP_CONFIG,
           APP_ENV: "production", // 既定は本番。dev バイパスを見るテストは env.APP_ENV を上書き
           NOTIFY_WEBHOOK_URL: "https://hooks.example.com/wh",
-          SESSION_SECRET: "test-session-secret",
+          SESSION_SECRET: TEST_SESSION_SECRET,
         },
       },
     }),

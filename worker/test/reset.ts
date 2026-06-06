@@ -12,7 +12,6 @@ const TABLES = [
   "daily_event_counts",
   "daily_session_metrics",
   "notification_dedupes",
-  "metrics_tokens",
 ];
 
 beforeEach(async () => {

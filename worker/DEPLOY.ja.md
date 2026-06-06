@@ -85,7 +85,7 @@ BASE=https://frontping.<subdomain>.workers.dev
 curl -s $BASE/health
 # => {"ok":true}
 
-# ダッシュボード（ブラウザで開く）。app_id と token を入力して Load
+# ダッシュボード（ブラウザで開く）。GitHub でログインしてサービスを選ぶ
 open $BASE/dashboard
 
 # イベント1件（Origin は APP_CONFIG の allowed_origins に含まれること）
@@ -97,13 +97,16 @@ curl -s -X POST $BASE/events \
 
 ## 7. 手動 export（任意・再実行用, §20.1）
 
+`/admin/export` は運用者の GitHub セッションで認可される。ログイン中のブラウザから
+`fp_session` Cookie をコピーして渡す:
+
 ```bash
 curl -s -X POST "$BASE/admin/export?app_id=product_recommender&year=2026&month=5" \
-  -H "Authorization: Bearer <metrics token>"
+  -H "Cookie: fp_session=<ダッシュボードのセッション Cookie>"
 ```
 
 ## メモ
 
 - 月次 export は `0 4 1 * *`（UTC）で前月分を自動実行。
 - 容量逼迫アラート・retention・daily_session_metrics 再計算も Cron で自動実行（§19.4）。
-- 設定変更（origins / limits / token）は再デプロイ or `wrangler secret put` で反映（静的構成）。
+- 設定変更（origins / limits）は再デプロイ or `wrangler secret put` で反映（静的構成）。
