@@ -176,13 +176,25 @@ export class Frontping {
 
   // ---- 内部 ----
 
+  // §17.6 バックオフ中はイベントを受け付けず破棄する（admission control を1箇所に集約）。
+  // 受理可なら true。停止中なら drop を1件計上して false を返す。
+  private admit(): boolean {
+    if (this.backoff.paused()) {
+      this.dropped++;
+      return false;
+    }
+    return true;
+  }
+
+  // 停止中のキュー一括破棄など、複数件をまとめて drop 計上する。
+  private dropMany(n: number): void {
+    this.dropped += n;
+  }
+
   private dispatch(eventName: string, props: Record<string, unknown>, pageOverride?: string): void {
     if (ERROR_EVENTS.has(eventName)) {
-      // §17.5 エラーは即時送信
-      if (this.backoff.paused()) {
-        this.dropped++;
-        return;
-      }
+      // §17.5 エラーは即時送信（停止中は破棄）
+      if (!this.admit()) return;
       void this.send(`${this.cfg.endpoint}/errors`, JSON.stringify(this.build(eventName, props, pageOverride)));
       return;
     }
@@ -205,10 +217,7 @@ export class Frontping {
   }
 
   private enqueue(ev: EventPayload): void {
-    if (this.backoff.paused()) {
-      this.dropped++;
-      return;
-    }
+    if (!this.admit()) return;
     this.queue.push(ev);
     if (this.queue.length >= this.cfg.maxBatch) void this.flushInternal(false);
   }
@@ -217,7 +226,7 @@ export class Frontping {
     if (this.queue.length === 0) return;
     if (this.backoff.paused()) {
       // 停止中はキューを破棄（無限堆積させない, §17.6）
-      this.dropped += this.queue.length;
+      this.dropMany(this.queue.length);
       this.queue = [];
       return;
     }
