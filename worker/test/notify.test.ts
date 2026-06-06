@@ -1,5 +1,5 @@
-import { env, fetchMock } from "cloudflare:test";
-import { beforeAll, afterEach, describe, it, expect } from "vitest";
+import { env } from "cloudflare:test";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { notifyError } from "../src/lib/notify";
 import type { NotifyPayload } from "../src/lib/notify";
 import type { AppConfig } from "../src/types";
@@ -33,22 +33,22 @@ function dedupeRow(fp: string) {
     .first();
 }
 
-beforeAll(() => {
-  fetchMock.activate();
-  fetchMock.disableNetConnect();
-});
-afterEach(() => fetchMock.assertNoPendingInterceptors());
+// 0.16 で cloudflare:test の fetchMock は廃止。グローバル fetch を差し替えて webhook 応答を制御。
+function stubFetch(status: number): void {
+  vi.stubGlobal("fetch", vi.fn(async () => new Response("body", { status })));
+}
+afterEach(() => vi.unstubAllGlobals());
 
 describe("notify dedupe after successful delivery (#3)", () => {
   it("does NOT record dedupe when webhook delivery fails (non-2xx)", async () => {
-    fetchMock.get("https://hooks.example.com").intercept({ path: "/wh", method: "POST" }).reply(500, "down");
+    stubFetch(500);
     await expect(notifyError(env, cfg, payload("fp_fail"), NOW)).rejects.toThrow();
     // 送信失敗 → last_notified_at は進めない（次回は抑制されない）
     expect(await dedupeRow("fp_fail")).toBeNull();
   });
 
   it("records dedupe only after a successful delivery", async () => {
-    fetchMock.get("https://hooks.example.com").intercept({ path: "/wh", method: "POST" }).reply(200, "ok");
+    stubFetch(200);
     await notifyError(env, cfg, payload("fp_ok"), NOW);
     expect(await dedupeRow("fp_ok")).not.toBeNull();
   });

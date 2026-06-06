@@ -1,4 +1,5 @@
-import { defineWorkersConfig, readD1Migrations } from "@cloudflare/vitest-pool-workers/config";
+import { defineConfig } from "vitest/config";
+import { cloudflareTest, readD1Migrations } from "@cloudflare/vitest-pool-workers";
 
 // マイグレーションを読み込み、テスト用 D1 に適用する（test/apply-migrations.ts）
 const migrations = await readD1Migrations("./migrations");
@@ -23,22 +24,23 @@ const TEST_APP_CONFIG = JSON.stringify({
   },
 });
 
-export default defineWorkersConfig({
-  test: {
-    setupFiles: ["./test/apply-migrations.ts"],
-    poolOptions: {
-      workers: {
-        singleWorker: true,
-        wrangler: { configPath: "./wrangler.toml" },
-        miniflare: {
-          bindings: {
-            TEST_MIGRATIONS: migrations,
-            APP_CONFIG: TEST_APP_CONFIG,
-            NOTIFY_WEBHOOK_URL: "https://hooks.example.com/wh",
-            SESSION_SECRET: "test-session-secret",
-          },
+export default defineConfig({
+  plugins: [
+    // 0.16+: poolOptions.workers の中身を cloudflareTest() に直接渡す
+    cloudflareTest({
+      wrangler: { configPath: "./wrangler.toml" },
+      miniflare: {
+        bindings: {
+          TEST_MIGRATIONS: migrations,
+          APP_CONFIG: TEST_APP_CONFIG,
+          NOTIFY_WEBHOOK_URL: "https://hooks.example.com/wh",
+          SESSION_SECRET: "test-session-secret",
         },
       },
-    },
+    }),
+  ],
+  test: {
+    // 0.16 で per-test 分離が廃止（per-file 分離）。各テスト前にデータを掃除して独立性を担保。
+    setupFiles: ["./test/apply-migrations.ts", "./test/reset.ts"],
   },
 });
