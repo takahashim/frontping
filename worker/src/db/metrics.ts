@@ -21,7 +21,9 @@ export type Summary = {
   error_rate: number | null;
 };
 
-// 期間サマリ。イベント系は daily_event_counts、セッション系は daily_session_metrics から。
+// 期間サマリ。イベント系は daily_event_counts（collect 時に即書込）、
+// セッション系は session_summaries を直読み（collect 時に upsert される＝ライブ。保持365日）。
+// daily_session_metrics（日次バッチ）は digest 通知 / 月次 export 専用で、ここでは使わない。
 export async function querySummary(
   env: Env,
   appId: string,
@@ -37,15 +39,17 @@ export async function querySummary(
     .all<{ event_name: string; n: number }>();
   const evMap = new Map(ev.results.map((r) => [r.event_name, r.n]));
 
+  // セッション系はライブな session_summaries を直接集計する。day 帰属は started_at ベース
+  // （aggregate.ts と同じく substr(started_at,1,10) で日付比較。from/to は 'YYYY-MM-DD'）。
   const s = await env.DB.prepare(
     `SELECT
-        SUM(sessions) AS sessions,
-        SUM(started_sessions) AS started,
-        SUM(completed_sessions) AS completed,
-        SUM(accepted_sessions) AS accepted,
-        SUM(errored_sessions) AS errored
-      FROM daily_session_metrics
-      WHERE app_id = ? AND day >= ? AND day <= ?`
+        COUNT(*) AS sessions,
+        SUM(started) AS started,
+        SUM(completed) AS completed,
+        SUM(accepted) AS accepted,
+        SUM(errored) AS errored
+      FROM session_summaries
+      WHERE app_id = ? AND substr(started_at, 1, 10) >= ? AND substr(started_at, 1, 10) <= ?`
   )
     .bind(appId, from, to)
     .first<{ sessions: number; started: number; completed: number; accepted: number; errored: number }>();

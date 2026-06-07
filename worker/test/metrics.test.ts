@@ -32,9 +32,29 @@ describe("querySummary (§9.4)", () => {
     const s = await querySummary(env, "test_app", WIDE.from, WIDE.to);
     expect(s.page_views).toBe(2);
     expect(s.clicks).toBe(1);
-    // daily_session_metrics は cron で生成されるため、この時点では 0 / null
+    // page_view / click はセッション影響イベントではない（session_summaries 行を作らない）。
+    // よって sessions=0 → completion/error rate は分母0で null。
+    expect(s.sessions).toBe(0);
     expect(s.completion_rate).toBeNull();
     expect(s.error_rate).toBeNull();
+  });
+
+  it("reflects session flags live from session_summaries (no cron needed)", async () => {
+    // flow_started → started, recommendation_shown → completed（lib/events.ts のマッピング）。
+    // daily_session_metrics の集計 cron を待たず、その場でサマリに反映される。
+    await postEvent({ session_id: "live1", event_name: "flow_started", widget_id: "w1", flow_version: "v1" });
+    await postEvent({
+      session_id: "live1",
+      event_name: "recommendation_shown",
+      widget_id: "w1",
+      flow_version: "v1",
+      properties: { result_id: "r1" },
+    });
+
+    const s = await querySummary(env, "test_app", WIDE.from, WIDE.to);
+    expect(s.started_sessions).toBe(1);
+    expect(s.completed_sessions).toBe(1);
+    expect(s.completion_rate).toBe(1); // completed / started = 1/1
   });
 
   it("returns zeros for an app with no data", async () => {
