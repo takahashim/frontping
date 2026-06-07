@@ -45,18 +45,41 @@ cp .env.deploy.example .env.deploy
 pnpm run migrate:remote
 ```
 
-## 4. secret を投入（§9.4 / §13.4 / §14.3）
+## 4. secret を投入（§13.4 / §14.3）
 
 ```bash
-# 管理API / dashboard 用トークン（app_id ごと）
-echo '{"product_recommender":"<長いランダム文字列>"}' | pnpm exec wrangler secret put METRICS_TOKENS
-
 # エラー/容量通知の webhook（任意。未設定なら通知は no-op）
 pnpm exec wrangler secret put NOTIFY_WEBHOOK_URL
 
 # IP ハッシュ用の salt（任意。設定時のみ ip_hash を保存）
 pnpm exec wrangler secret put IP_HASH_SECRET
 ```
+
+## 4a. ダッシュボードを GitHub ログインで保護（§18.1）
+
+`/dashboard`・`/admin` を GitHub OAuth でゲートする。**secret を設定すると有効化**される。
+未設定の場合、本番ではダッシュボードを開けず設定不足の案内ページを表示し、ローカル開発
+（`APP_ENV=development`）のときのみ認証をバイパスする。トークン認証によるフォールバックは無い。
+
+1. GitHub で **OAuth App** を作成（Settings → Developer settings → OAuth Apps → New）:
+   - Homepage URL: `https://frontping.<sub>.workers.dev`
+   - **Authorization callback URL**: `https://frontping.<sub>.workers.dev/dashboard/callback`
+   - Client ID を控え、Client secret を生成。
+2. secret を投入:
+
+```bash
+pnpm exec wrangler secret put GITHUB_CLIENT_ID        # OAuth App の Client ID
+pnpm exec wrangler secret put GITHUB_CLIENT_SECRET    # OAuth App の Client secret
+pnpm exec wrangler secret put SESSION_SECRET          # 例: openssl rand -hex 32
+pnpm exec wrangler secret put ALLOWED_GITHUB_USERS    # 例: takahashim,foo,bar（カンマ区切り）
+```
+
+> **`ALLOWED_GITHUB_USERS` は必須**。fail-closed なので、未設定／一覧に無いユーザーは 403 で
+> 拒否される（誰も入れない）。自分の GitHub ユーザー名を必ず入れる。
+
+有効化後はダッシュボードを開くと GitHub ログインへ遷移する。ログイン中はセッション Cookie で認可され、
+`/admin` は運用者セッションのみで操作できる。`/dashboard/logout` でログアウト。
+per-app の閲覧トークン認証は廃止済みで、閲覧はダッシュボードの GitHub ログインに一本化している。
 
 ## 5. デプロイ
 
@@ -74,7 +97,7 @@ Cron Triggers（日次/毎時/月次）は `wrangler.toml` の `[triggers]` か�
 - Repository **Secrets**: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`（wrangler の認証用）
 
 CI では `.env.deploy` の代わりにこれらの環境変数が使われ、`config:gen` が同じく ID を注入する。
-`METRICS_TOKENS` 等の Worker secret は `wrangler secret put`（手順4）で投入済みのものが使われる。
+`SESSION_SECRET` / `GITHUB_CLIENT_ID` 等の Worker secret は `wrangler secret put`（手順4・4a）で投入済みのものが使われる。
 
 ## 6. 動作確認
 
@@ -95,7 +118,7 @@ curl -s -X POST $BASE/events \
 # => {"ok":true} (202)
 ```
 
-## 7. 手動 export（任意・再実行用, §20.1）
+## 7. 手動 export（任意・再実行用。db-spec.ja.md「Export」）
 
 `/admin/export` は運用者の GitHub セッションで認可される。ログイン中のブラウザから
 `fp_session` Cookie をコピーして渡す:
@@ -108,5 +131,5 @@ curl -s -X POST "$BASE/admin/export?app_id=product_recommender&year=2026&month=5
 ## メモ
 
 - 月次 export は `0 4 1 * *`（UTC）で前月分を自動実行。
-- 容量逼迫アラート・retention・daily_session_metrics 再計算も Cron で自動実行（§19.4）。
+- 容量逼迫アラート・retention・daily_session_metrics 再計算も Cron で自動実行（db-spec.ja.md「Retention」）。
 - 設定変更（origins / limits）は再デプロイ or `wrangler secret put` で反映（静的構成）。

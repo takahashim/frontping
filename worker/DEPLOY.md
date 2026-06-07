@@ -55,31 +55,31 @@ pnpm exec wrangler secret put NOTIFY_WEBHOOK_URL
 pnpm exec wrangler secret put IP_HASH_SECRET
 ```
 
-## 4a. Dashboard を GitHub ログインで保護（§18.1）
+## 4a. Protect the dashboard with GitHub login (§18.1)
 
-`/dashboard`・`/metrics`・`/admin` を GitHub OAuth でゲートする。**設定すると有効化**され、
-未設定なら従来どおりトークン認証のみで動く（後方互換）。
+Gate `/dashboard` and `/admin` behind GitHub OAuth. **Setting the secrets enables it.** When unset,
+the dashboard is unavailable in production (it shows a config-incomplete page); only local development
+(`APP_ENV=development`) bypasses auth. There is no token-based fallback.
 
-1. GitHub で **OAuth App** を作成（Settings → Developer settings → OAuth Apps → New）:
+1. Create a GitHub **OAuth App** (Settings → Developer settings → OAuth Apps → New):
    - Homepage URL: `https://frontping.<sub>.workers.dev`
    - **Authorization callback URL**: `https://frontping.<sub>.workers.dev/dashboard/callback`
-   - Client ID を控え、Client secret を生成。
-2. secret を投入:
+   - Note the Client ID and generate a Client secret.
+2. Put the secrets:
 
 ```bash
-pnpm exec wrangler secret put GITHUB_CLIENT_ID        # OAuth App の Client ID
-pnpm exec wrangler secret put GITHUB_CLIENT_SECRET    # OAuth App の Client secret
-pnpm exec wrangler secret put SESSION_SECRET          # 例: openssl rand -hex 32
-pnpm exec wrangler secret put ALLOWED_GITHUB_USERS    # 例: takahashim,foo,bar（カンマ区切り）
+pnpm exec wrangler secret put GITHUB_CLIENT_ID        # OAuth App Client ID
+pnpm exec wrangler secret put GITHUB_CLIENT_SECRET    # OAuth App Client secret
+pnpm exec wrangler secret put SESSION_SECRET          # e.g. openssl rand -hex 32
+pnpm exec wrangler secret put ALLOWED_GITHUB_USERS    # e.g. takahashim,foo,bar (comma-separated)
 ```
 
-> **`ALLOWED_GITHUB_USERS` は必須**。fail-closed なので、未設定／一覧に無いユーザーは
-> 403 で拒否される（誰も入れない）。自分の GitHub ユーザー名を必ず入れる。
+> **`ALLOWED_GITHUB_USERS` is required.** It is fail-closed: users not in the list (or when unset)
+> are rejected with 403 (nobody can get in). Be sure to include your own GitHub username.
 
-有効化後はダッシュボードを開くと GitHub ログインへ。ログイン中はセッション Cookie で認可され、
-`/metrics`・`/admin` は運用者セッションのみで閲覧・操作できる。`/dashboard/logout` でログアウト。
-（per-app の閲覧トークン認証は廃止。閲覧はダッシュボードの GitHub ログインに一本化。
-ローカル開発では `APP_ENV=development` ＋ OAuth 未設定なら認証を省略できる。）
+Once enabled, opening the dashboard redirects to GitHub login. While logged in, the session cookie
+authorizes access; `/admin` operations require the operator session. Log out via `/dashboard/logout`.
+Per-app metrics token auth has been removed — viewing is unified under the dashboard's GitHub login.
 
 ## 5. Deploy
 
@@ -118,7 +118,7 @@ curl -s -X POST $BASE/events \
 # => {"ok":true} (202)
 ```
 
-## 7. Manual export (optional, for re-runs, §20.1)
+## 7. Manual export (optional, for re-runs; see db-spec.ja.md "Export")
 
 `/admin/export` is gated by the operator's GitHub session, so send the dashboard's
 `fp_session` cookie (copy it from your logged-in browser):
@@ -131,5 +131,5 @@ curl -s -X POST "$BASE/admin/export?app_id=product_recommender&year=2026&month=5
 ## Notes
 
 - The monthly export runs at `0 4 1 * *` (UTC) for the previous month.
-- Capacity alerts, retention, and daily_session_metrics recomputation also run automatically via Cron (§19.4).
+- Capacity alerts, retention, and daily_session_metrics recomputation also run automatically via Cron (see db-spec.ja.md "Retention").
 - Configuration changes (origins / limits) take effect via redeploy or `wrangler secret put` (static configuration).
