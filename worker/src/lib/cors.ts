@@ -23,10 +23,11 @@ export function corsHeaders(origin: string | null): Record<string, string> {
 }
 
 export function preflightHeaders(origin: string | null): Record<string, string> {
+  // 収集系は POST + content-type のみ（§15.1）。Max-Age はプリフライト結果のキャッシュ用。
   return {
     ...corsHeaders(origin),
-    "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-    "Access-Control-Allow-Headers": "content-type, authorization",
+    "Access-Control-Allow-Methods": "POST",
+    "Access-Control-Allow-Headers": "content-type",
     "Access-Control-Max-Age": "86400",
   };
 }

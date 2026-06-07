@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "./types";
 import { collect } from "./routes/collect";
-import { getMetrics, getTimeseries, getErrors } from "./routes/metrics";
 import { postExport } from "./routes/admin";
 import { preflightHeaders } from "./lib/cors";
 import { runRetention } from "./db/retention";
@@ -27,10 +26,10 @@ app.post("/events", (c) => collect(c, "single"));
 app.post("/events/batch", (c) => collect(c, "batch"));
 app.post("/errors", (c) => collect(c, "error"));
 
-// メトリクス（§9.4）
-app.get("/metrics", (c) => getMetrics(c));
-app.get("/metrics/timeseries", (c) => getTimeseries(c));
-app.get("/metrics/errors", (c) => getErrors(c));
+// 収集系は POST のみ。他メソッドは 405 を返す（§9.1）。OPTIONS は上の CORS で処理済み。
+app.on(["GET", "PUT", "PATCH", "DELETE", "HEAD"], ["/events", "/events/batch", "/errors"], (c) =>
+  c.json({ error: "method_not_allowed" }, 405, { Allow: "POST" })
+);
 
 // §20.1 手動 export（管理API）
 app.post("/admin/export", (c) => postExport(c));

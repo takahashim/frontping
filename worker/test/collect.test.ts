@@ -34,13 +34,24 @@ describe("origin / CORS (§15)", () => {
     expect(res.headers.get("Access-Control-Allow-Origin")).toBe(ORIGIN);
   });
 
-  it("answers preflight", async () => {
+  it("answers preflight with POST + content-type only", async () => {
     const res = await SELF.fetch("https://worker.test/events", {
       method: "OPTIONS",
       headers: { Origin: ORIGIN },
     });
     expect(res.status).toBe(204);
-    expect(res.headers.get("Access-Control-Allow-Methods")).toContain("POST");
+    expect(res.headers.get("Access-Control-Allow-Methods")).toBe("POST");
+    expect(res.headers.get("Access-Control-Allow-Headers")).toBe("content-type");
+  });
+});
+
+describe("method not allowed (§9.1)", () => {
+  it("returns 405 with Allow: POST for non-POST on collection endpoints", async () => {
+    for (const path of ["/events", "/events/batch", "/errors"]) {
+      const res = await SELF.fetch(`https://worker.test${path}`, { method: "GET" });
+      expect(res.status).toBe(405);
+      expect(res.headers.get("Allow")).toBe("POST");
+    }
   });
 });
 

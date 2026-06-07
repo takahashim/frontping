@@ -3,7 +3,7 @@ import type { Env } from "../types";
 import { requireMetricsAuth } from "./guard";
 import { exportMonth } from "../db/exporter";
 
-// §20.1 手動 export（管理API。token 認証。自動化までの補助 / 再実行用）
+// §20.1 手動 export（管理API。GitHub セッション認証 = requireMetricsAuth。自動化までの補助 / 再実行用）
 export async function postExport(c: Context<{ Bindings: Env }>): Promise<Response> {
   const guard = await requireMetricsAuth(c);
   if (!guard.ok) return guard.res;

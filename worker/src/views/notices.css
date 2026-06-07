@@ -1,0 +1,36 @@
+body {
+  font: 14px/1.7 system-ui, sans-serif;
+  margin: 0;
+  padding: 40px;
+  max-width: 640px;
+}
+
+code {
+  background: #f3f4f6;
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+pre {
+  background: #f3f4f6;
+  padding: 12px;
+  border-radius: 8px;
+}
+
+a {
+  color: #2563eb;
+}
+
+.muted {
+  color: #888;
+}
+
+.btn {
+  display: inline-block;
+  margin: 8px 0;
+  padding: 9px 16px;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  text-decoration: none;
+}

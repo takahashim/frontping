@@ -3,10 +3,11 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import type { Env } from "../types";
 import { signSession, verifySession, SESSION_TTL_SEC, type Session } from "../lib/session";
 import { isDevEnv } from "../lib/local";
-import { loggedOutHtml } from "../dashboard";
+import { renderLoggedOut } from "../views/notices";
 
 // ダッシュボードの GitHub OAuth ログイン。
-// 未設定環境（GITHUB_* / SESSION_SECRET なし）では無効＝従来どおりトークン認証で動作。
+// 未設定環境（GITHUB_* / SESSION_SECRET なし）では、本番はダッシュボードを開けず
+// 設定不足の案内を出す。ローカル開発（APP_ENV=development）のみ認証をバイパスする。
 
 const SESSION_COOKIE = "fp_session";
 const STATE_COOKIE = "fp_oauth_state";
@@ -31,7 +32,7 @@ export function githubOAuthStatus(env: Env): { state: "off" | "partial" | "on"; 
 
 // ローカル開発（APP_ENV=development）かつ OAuth 完全未設定なら認証を省略してよいか。
 // 本番（production/preview）では発動せず、OAuth 有効/中途半端時（state !== off）も発動しない。
-// ダッシュボード UI（一覧表示）と metrics API（認可ガード）で同じ判断を共有する。
+// ダッシュボード UI（getDashboard）と管理API（requireMetricsAuth の認可ガード）で同じ判断を共有する。
 export function devAuthBypass(env: Env): boolean {
   return isDevEnv(env) && githubOAuthStatus(env).state === "off";
 }
@@ -117,5 +118,5 @@ export function logout(c: Ctx): Response {
   // frontping 側のセッションを破棄（set 時と同じ属性で削除。path 一致が必須）。
   // GitHub の連携解除はこちらでは行わず、着地ページから GitHub の管理ページへ誘導する。
   deleteCookie(c, SESSION_COOKIE, { path: "/", secure: true, sameSite: "Lax" });
-  return c.html(loggedOutHtml(githubConnectionUrl(c.env)), 200, { "Cache-Control": "no-store" });
+  return c.html(renderLoggedOut(githubConnectionUrl(c.env)), 200, { "Cache-Control": "no-store" });
 }

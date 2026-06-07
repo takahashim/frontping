@@ -3,6 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 
+[[rules]]
+type = "Text"
+globs = ["**/*.css", "**/*.client.js"]
+fallthrough = true
+
 # Workers Logs（ログ保持・検索。運用調査をインフラ追加なしで可能に）
 [observability]
 enabled = true
@@ -32,9 +37,10 @@ bucket_name = "frontping-exports"
 crons = ["0 3 * * *", "0 * * * *", "0 4 1 * *"]
 
 # --- 静的 app 設定（§24）。秘匿値は secret に分離して持つ ---
-#   secrets（`wrangler secret put` で投入）:
-#     METRICS_TOKENS    : {"app_id":"token", ...}  (§9.4)
+#   secrets（`wrangler secret put` で投入。詳細は §24.2）:
 #     NOTIFY_WEBHOOK_URL : Slack/Discord webhook   (§13.4)
+#     IP_HASH_SECRET     : ip_hash 生成 salt        (§14.3)
+#     GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET / SESSION_SECRET / ALLOWED_GITHUB_USERS : ダッシュボード GitHub ログイン (§18.1)
 # 実行環境。development はローカル開発（dev 用の認証省略を有効化）。
 # ローカルは .dev.vars の APP_ENV=development が [vars] を上書きする。
 [vars]

@@ -11,7 +11,7 @@ export interface NotifyPayload {
   occurred_at: string;
 }
 
-// 抑制中か判定する（§13.3）。抑制中なら count を増やして false。
+// 抑制中か判定する（§13.3）。抑制中なら false（送信しない）。
 // 送信可なら true を返すが、last_notified_at はまだ進めない（送信成功後に markNotified で確定）。
 async function claimNotify(
   env: Env,

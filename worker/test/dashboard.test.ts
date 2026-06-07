@@ -26,7 +26,7 @@ describe("githubOAuthStatus (設定の完全性)", () => {
 
 describe("GET /dashboard (§18.1)", () => {
   // OAuth 未設定 ＋ APP_ENV=development（ローカル開発扱い）→ 一覧を出す
-  it("serves the dashboard and injects the service list in development", async () => {
+  it("serves the service list in development", async () => {
     env.APP_ENV = "development";
     const res = await SELF.fetch("https://worker.test/dashboard");
     expect(res.status).toBe(200);
@@ -34,10 +34,34 @@ describe("GET /dashboard (§18.1)", () => {
     expect(res.headers.get("Cache-Control")).toBe("no-store");
     const html = await res.text();
     expect(html).toContain("frontping dashboard");
-    expect(html).toContain("/metrics?");
-    expect(html).not.toContain("__FRONTPING_APPS__"); // placeholder は置換済み
-    expect(html).toContain("test_app"); // APP_CONFIG のキーが一覧に注入される
-    expect(html).toContain("test_app_low");
+    expect(html).toContain("サービス一覧");
+    expect(html).toContain('href="/dashboard?app=test_app"'); // 一覧は詳細への ?app= リンク
+    expect(html).toContain("test_app_low"); // APP_CONFIG のキーが一覧に出る
+    expect(html).not.toContain("/metrics"); // 読み取り API は廃止（fetch しない）
+  });
+
+  // ?app= で詳細ビュー。集計値はサーバ側で算出して埋め込む（HTTP fetch しない）。
+  it("renders the detail view with server-rendered summary and charts when ?app= is given", async () => {
+    env.APP_ENV = "development";
+    const res = await SELF.fetch("https://worker.test/dashboard?app=test_app");
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("← サービス一覧へ");
+    expect(html).toContain("page views"); // サマリーカード（サーバレンダリング）
+    expect(html).toContain('id="c24"'); // チャートのコンテナ
+    expect(html).toContain('id="c30"');
+    expect(html).toContain("renderChart"); // 埋め込みチャートスクリプト
+    expect(html).not.toContain("/metrics");
+  });
+
+  // 未知の app は詳細にせず一覧へフォールバック
+  it("falls back to the list for an unknown ?app=", async () => {
+    env.APP_ENV = "development";
+    const res = await SELF.fetch("https://worker.test/dashboard?app=nope");
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain("サービス一覧");
+    expect(html).not.toContain("← サービス一覧へ");
   });
 
   // OAuth 未設定かつ APP_ENV=production（本番）→ 設定不足の案内を必ず出す
