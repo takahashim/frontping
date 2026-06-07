@@ -1,5 +1,11 @@
 # frontping: Lightweight Analytics and Error Notification Specification
 
+> **ドキュメント構成** — 本仕様は3ファイルに分割している。本書（コア）の各セクションは `§` 番号を持つ。SDK・データストアの2ファイルは番号を持たず、セクション名で参照する。本書から見当たらない内容は下記の分割先を参照する。
+>
+> - 本書 `spec.ja.md`（コア）: 概要・対象範囲・基本方針・イベントモデル・標準イベント・イベント属性・Worker API・バリデーション・エラー通知・プライバシー・CORS・上限と容量・ダッシュボード・非機能要件・実装上の注意（§1〜§7, §9, §10, §13〜§16, §18, §22〜§28）。
+> - [`sdk-spec.ja.md`](./sdk-spec.ja.md): フロントエンド SDK。
+> - [`db-spec.ja.md`](./db-spec.ja.md): D1 スキーマ・セッション要約・日次集計・retention・export。
+
 ## 1. 概要
 
 本仕様は、小規模なフロントエンドアプリケーションおよびウィジェット向けの、軽量な解析・エラー通知基盤を定義する。
@@ -8,7 +14,7 @@
 
 ### 目的
 
-主な目的は以下である。
+本システムの主な目的は以下である。
 
 - ページビューを記録する
 - クリック回数を記録する
@@ -18,7 +24,7 @@
 - 短期の生イベントと長期の集計値を保持する
 - 将来的にR2等へexportできる余地を残す
 
-本システムは、PostHog、Sentry、Google Analyticsの完全な代替を目指さない。  
+本システムは、PostHog、Sentry、Google Analyticsの完全な代替を目指すものではない。 
 小規模アプリに低コストで導入できる、最小限のanalytics/error monitoring基盤を目指す。
 
 ### ポリシー
@@ -48,7 +54,7 @@
 - エラー通知
 - D1への保存
 - 日次集計
-- 簡単なメトリクス取得API
+- 集計値を閲覧する読み取り専用ダッシュボード
 - retention処理
 - 手動exportを想定したデータ構造
 
@@ -71,32 +77,25 @@
 
 ## 3. 全体構成
 
-```text
-Frontend SDK
-  ↓
-Cloudflare Worker
-  POST /events
-  POST /events/batch
-  POST /errors
-  GET  /metrics
-  ↓
-Cloudflare D1
-  raw_events
-  session_summaries
-  daily_event_counts
-  daily_session_metrics
-  error_events
-  notification_dedupes
-```
-
-必要に応じて、将来的に以下を追加する。
+Cloudflare Workers を中心に、以下の要素で構成する。
 
 ```text
-Cloudflare R2
-  monthly export
-  raw event archive
-  error archive
+フロントエンド SDK（sdk-spec.ja.md）
+    │  POST /events, /events/batch, /errors
+    ▼
+Worker（Hono）
+    ├─ 検証・正規化（§10, §25）
+    ├─ D1 へ書き込み（raw_events / daily_* / session_summaries / error_events）
+    ├─ エラー通知（§13、Slack/Discord webhook）
+    └─ 読み取り専用ダッシュボード GET /dashboard（§18、GitHub OAuth）
+
+D1（db-spec.ja.md）            … 生イベント＋集計テーブル（source of truth）
+KV                            … 総量カウンタ（§16.2）
+R2                            … 月次 export 先（db-spec.ja.md）
+Cron Triggers（db-spec.ja.md） … 集計再計算・retention・容量チェック・月次 export
 ```
+
+データの流れは「SDK が収集 → Worker が検証・正規化して D1 に保存（生イベント＋先行集計）→ Cron が集計の確定再計算・retention・export を実行 → ダッシュボードが集計値を表示」となる。集計の真の source of truth は `raw_events` であり、集計テーブルはそこから再生成できる（§25.5）。
 
 ---
 
@@ -135,19 +134,9 @@ error_events
 
 ### 4.2 生イベントは短期保存
 
-`raw_events` は詳細調査用であり、永続保存しない。
+`raw_events` は詳細調査用であり、永続保存しない。短期保存（生イベント・エラー）と長期保存（日次集計）を分け、保存期間はアプリごとに変更可能とする。
 
-初期設定では以下とする。
-
-```text
-raw_events: 30日保存
-error_events: 90日保存
-session_summaries: 1年保存
-daily_event_counts: 長期保存
-daily_session_metrics: 長期保存
-```
-
-保存期間はアプリごとに変更可能とする。
+具体的な保存期間と削除処理（retention）は [`db-spec.ja.md`](./db-spec.ja.md) の「Retention」を参照。
 
 ---
 
@@ -397,239 +386,6 @@ URLは `source` に入れてよいが、§14.1 に従い query string を含め�
 
 `widget_opened`, `flow_started`, `step_viewed` は共通フィールド（§5.1）に加え、`step_viewed` のみ `step`（number）を必須とする。
 
----
-
-## 8. D1スキーマ
-
-### 8.1 `raw_events`
-
-短期保存する生イベント。
-
-```sql
-CREATE TABLE raw_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-  occurred_at TEXT NOT NULL,
-  received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-  app_id TEXT NOT NULL,
-  session_id TEXT NOT NULL,
-  event_name TEXT NOT NULL,
-
-  page_path TEXT NOT NULL DEFAULT '',
-  widget_id TEXT NOT NULL DEFAULT '',
-  flow_version TEXT NOT NULL DEFAULT '',
-
-  step INTEGER,
-  target_id TEXT,
-  choice_id TEXT,
-  result_id TEXT,
-
-  elapsed_ms INTEGER,
-  properties_json TEXT NOT NULL DEFAULT '{}',
-
-  user_agent TEXT,
-  ip_hash TEXT
-);
-
-CREATE INDEX idx_raw_events_time
-  ON raw_events(occurred_at);
-
-CREATE INDEX idx_raw_events_app_event_time
-  ON raw_events(app_id, event_name, occurred_at);
-
-CREATE INDEX idx_raw_events_session
-  ON raw_events(session_id, occurred_at);
-
-CREATE INDEX idx_raw_events_widget_flow
-  ON raw_events(app_id, widget_id, flow_version, occurred_at);
-```
-
-### 8.2 `session_summaries`
-
-セッション単位の要約。  
-生イベント削除後も、フロー分析に必要な情報を残す。
-
-```sql
-CREATE TABLE session_summaries (
-  session_id TEXT PRIMARY KEY,
-
-  app_id TEXT NOT NULL,
-  widget_id TEXT NOT NULL DEFAULT '',
-  flow_version TEXT NOT NULL DEFAULT '',
-
-  page_path TEXT NOT NULL DEFAULT '',
-
-  started_at TEXT NOT NULL,
-  ended_at TEXT,
-  duration_ms INTEGER,
-
-  opened INTEGER NOT NULL DEFAULT 0,
-  started INTEGER NOT NULL DEFAULT 0,
-  completed INTEGER NOT NULL DEFAULT 0,
-  accepted INTEGER NOT NULL DEFAULT 0,
-  rejected INTEGER NOT NULL DEFAULT 0,
-  restarted INTEGER NOT NULL DEFAULT 0,
-  errored INTEGER NOT NULL DEFAULT 0,
-
-  max_step INTEGER NOT NULL DEFAULT 0,
-  step_count INTEGER NOT NULL DEFAULT 0,
-
-  result_id TEXT,
-  choices_json TEXT NOT NULL DEFAULT '[]',
-
-  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE INDEX idx_session_summaries_app_started
-  ON session_summaries(app_id, started_at);
-
-CREATE INDEX idx_session_summaries_widget_flow
-  ON session_summaries(app_id, widget_id, flow_version, started_at);
-
-CREATE INDEX idx_session_summaries_result
-  ON session_summaries(app_id, result_id);
-```
-
-### 8.3 `daily_event_counts`
-
-日次のイベントカウンタ。  
-長期保存する。
-
-```sql
-CREATE TABLE daily_event_counts (
-  day TEXT NOT NULL,
-
-  app_id TEXT NOT NULL,
-  event_name TEXT NOT NULL,
-
-  page_path TEXT NOT NULL DEFAULT '',
-  widget_id TEXT NOT NULL DEFAULT '',
-  flow_version TEXT NOT NULL DEFAULT '',
-
-  step INTEGER NOT NULL DEFAULT 0,
-  target_id TEXT NOT NULL DEFAULT '',
-  choice_id TEXT NOT NULL DEFAULT '',
-  result_id TEXT NOT NULL DEFAULT '',
-
-  count INTEGER NOT NULL DEFAULT 0,
-
-  PRIMARY KEY (
-    day,
-    app_id,
-    event_name,
-    page_path,
-    widget_id,
-    flow_version,
-    step,
-    target_id,
-    choice_id,
-    result_id
-  )
-);
-```
-
-#### カーディナリティ上の注意
-
-このPKは `page_path × target_id × choice_id × result_id × step` を含むため、組み合わせ次第で1日あたりの行数が爆発する。  
-`daily_event_counts` は**無期限保存**（§4.2）なので、肥大化を抑えるため以下を必須とする。
-
-- `page_path` は集計前に正規化し（§25.2）、必要なら**許可パスのホワイトリスト**でそれ以外を `other` に丸める。
-- 高カーディナリティになりやすい `target_id`（任意の要素クリック）は、集計対象を**計測対象として登録した要素のみ**に限定する。未登録は raw_events にのみ残し、daily には載せない。
-- どうしても軸が増える場合は、`click` の `target_id` 別集計を別テーブルに分離し、保存期間を `daily_event_counts` より短くすることを検討する。
-
-集計に使わない属性は、必ず空文字（`''`）に正規化してPKを縮約する。
-
-### 8.4 `daily_session_metrics`
-
-日次のセッション指標。  
-長期保存する。
-
-```sql
-CREATE TABLE daily_session_metrics (
-  day TEXT NOT NULL,
-
-  app_id TEXT NOT NULL,
-  widget_id TEXT NOT NULL DEFAULT '',
-  flow_version TEXT NOT NULL DEFAULT '',
-
-  sessions INTEGER NOT NULL DEFAULT 0,
-  opened_sessions INTEGER NOT NULL DEFAULT 0,
-  started_sessions INTEGER NOT NULL DEFAULT 0,
-  completed_sessions INTEGER NOT NULL DEFAULT 0,
-  accepted_sessions INTEGER NOT NULL DEFAULT 0,
-  rejected_sessions INTEGER NOT NULL DEFAULT 0,
-  restarted_sessions INTEGER NOT NULL DEFAULT 0,
-  errored_sessions INTEGER NOT NULL DEFAULT 0,
-
-  total_duration_ms INTEGER NOT NULL DEFAULT 0,
-  total_max_step INTEGER NOT NULL DEFAULT 0,
-
-  PRIMARY KEY (
-    day,
-    app_id,
-    widget_id,
-    flow_version
-  )
-);
-```
-
-### 8.5 `error_events`
-
-エラー詳細を保存する。
-
-```sql
-CREATE TABLE error_events (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-
-  occurred_at TEXT NOT NULL,
-  received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-
-  app_id TEXT NOT NULL,
-  session_id TEXT,
-
-  page_path TEXT NOT NULL DEFAULT '',
-  widget_id TEXT NOT NULL DEFAULT '',
-  flow_version TEXT NOT NULL DEFAULT '',
-
-  message TEXT NOT NULL,
-  stack TEXT,
-  fingerprint TEXT,
-  source TEXT,
-
-  user_agent TEXT,
-  ip_hash TEXT,
-
-  properties_json TEXT NOT NULL DEFAULT '{}'
-);
-
-CREATE INDEX idx_error_events_time
-  ON error_events(occurred_at);
-
-CREATE INDEX idx_error_events_app_time
-  ON error_events(app_id, occurred_at);
-
-CREATE INDEX idx_error_events_fingerprint
-  ON error_events(app_id, fingerprint, occurred_at);
-```
-
-### 8.6 `notification_dedupes`
-
-同一エラーの通知連打を防ぐ。
-
-```sql
-CREATE TABLE notification_dedupes (
-  app_id TEXT NOT NULL,
-  fingerprint TEXT NOT NULL,
-  last_notified_at TEXT NOT NULL,
-  count INTEGER NOT NULL DEFAULT 1,
-
-  PRIMARY KEY (
-    app_id,
-    fingerprint
-  )
-);
-```
 
 ---
 
@@ -757,63 +513,6 @@ Status:
 Response / Status は §9.1 と同じとし、成功時は **`202 Accepted`** を返す。  
 `message` を欠く場合は `400` とする（§10.2）。
 
-### 9.4 `GET /metrics`
-
-簡易ダッシュボード用の集計値を返す。
-
-#### 認証
-
-`/metrics` は集計値とはいえ非公開情報である。  
-`POST /events` 系の Origin 制限とは別に、**運用者の認証を必須**とする。
-
-閲覧は同梱ダッシュボードの **GitHub ログイン（セッション Cookie）** に一本化する。  
-認証に失敗した場合は `401 Unauthorized` を返す。CORS の許可 Origin とは独立に扱う。  
-（ローカル開発では `APP_ENV=development` かつ OAuth 未設定なら認証を省略できる。）
-
-Query parameters:
-
-| Parameter | Required | Description |
-|---|---:|---|
-| `app_id` | yes | アプリID |
-| `from` | no | 開始日 |
-| `to` | no | 終了日 |
-| `widget_id` | no | ウィジェットID |
-| `flow_version` | no | フロー版 |
-
-Response example:
-
-```json
-{
-  "app_id": "product_recommender",
-  "from": "2026-06-01",
-  "to": "2026-06-07",
-  "summary": {
-    "page_views": 1200,
-    "clicks": 3400,
-    "sessions": 800,
-    "started_sessions": 800,
-    "completed_sessions": 420,
-    "accepted_sessions": 210,
-    "errored_sessions": 12,
-    "error_events": 15,
-    "completion_rate": 0.525,
-    "acceptance_rate": 0.5,
-    "error_rate": 0.015
-  }
-}
-```
-
-各レートは §18.3 の定義に従う。上記の例では以下のとおり。
-
-```text
-completion_rate = completed_sessions / started_sessions = 420 / 800 = 0.525
-acceptance_rate = accepted_sessions / completed_sessions = 210 / 420 = 0.5
-error_rate      = errored_sessions  / sessions          = 12  / 800 = 0.015
-```
-
-`errored_sessions`（エラーが発生したセッション数）と `error_events`（エラーイベントの総数）は**別の値**であり、`error_rate` の分子には `errored_sessions` を用いる。
-
----
 
 ## 10. バリデーション
 
@@ -885,120 +584,9 @@ error_occurred:
 
 ---
 
-## 11. セッション要約
+## 11. セッション要約 / 12. 日次集計
 
-### 11.1 更新タイミング
-
-`session_summaries` は、以下のイベント受信時に更新する。
-
-```text
-widget_opened
-flow_started
-step_viewed
-choice_selected
-recommendation_shown
-recommendation_accepted
-recommendation_rejected
-flow_restarted
-error_occurred
-api_failed
-```
-
-### 11.2 更新ルール
-
-| Event | Update |
-|---|---|
-| `widget_opened` | `opened = 1` |
-| `flow_started` | `started = 1` |
-| `step_viewed` | `max_step` を更新 |
-| `choice_selected` | `choices_json` に `{ step, choice_id }` を追加 |
-| `recommendation_shown` | `completed = 1`, `result_id` を保存 |
-| `recommendation_accepted` | `accepted = 1` |
-| `recommendation_rejected` | `rejected = 1` |
-| `flow_restarted` | `restarted = 1` |
-| `error_occurred` | `errored = 1` |
-| `api_failed` | `errored = 1` |
-
-### 11.3 冪等性と到着順序
-
-`sendBeacon` やバッチ送信により、イベントは**順不同・重複して到着**しうる。  
-そのため、各更新は冪等になるよう実装する。
-
-- `opened` / `started` / `completed` / `accepted` / `rejected` / `restarted` / `errored` は 0→1 の**単調なフラグ**とし、`MAX(既存, 1)` 相当で更新する（重複到着しても結果は変わらない）。
-- `max_step` は `MAX(既存, step)` で更新する。
-- `started_at` は `MIN(既存, occurred_at)`、`ended_at` は `MAX(既存, occurred_at)` で更新し、`duration_ms = ended_at - started_at` を再計算する。
-- `choices_json` への append は重複・順序乱れ・lost update のリスクがあるため、**append ではなく `(step, choice_id)` でユニーク化したうえで step 昇順に正規化**して保存する。または raw_events から定期再生成する（§25.5）。
-
-`occurred_at` はクライアント時刻のため信頼できない（§25.6）。`started_at` / `ended_at` の確定には正規化済みの値を用いる。
-
-### 11.4 page_path の扱い
-
-1セッションが複数ページを跨ぐ場合、`session_summaries.page_path` には**最初のイベントの page_path（エントリポイント）**を保存する。  
-ページ遷移の詳細は raw_events を参照する。
-
-### 11.5 注意点
-
-`session_summaries` は厳密なイベントログではなく、分析用の要約である。  
-詳細な順序確認は `raw_events` を利用する。
-
----
-
-## 12. 日次集計
-
-### 12.1 イベントカウント
-
-各イベント受信時に、`daily_event_counts` をupsertする。
-
-集計キーは以下とする。
-
-```text
-day
-app_id
-event_name
-page_path
-widget_id
-flow_version
-step
-target_id
-choice_id
-result_id
-```
-
-### 12.2 セッション指標
-
-`daily_session_metrics` は、定期処理または管理APIで更新する。
-
-算出対象:
-
-```text
-sessions
-opened_sessions
-started_sessions
-completed_sessions
-accepted_sessions
-rejected_sessions
-restarted_sessions
-errored_sessions
-total_duration_ms
-total_max_step
-```
-
-平均値は保存せず、合計値から算出する。
-
-```text
-avg_duration_ms = total_duration_ms / completed_sessions
-avg_max_step = total_max_step / sessions
-```
-
-#### 日付帰属と確定タイミング
-
-`daily_session_metrics` の `day` は、セッションの **`started_at`（UTC日付）** を基準に帰属させる。  
-日をまたいだセッションも、開始日にのみ計上する（二重計上を避ける）。
-
-集計は冪等にする。`session_summaries` を `day` 単位で全件再計算して該当行を置き換える方式とし、`raw_events` の保存期間内であればいつでも再生成できるようにする（§25.5）。  
-直近日のセッションは未確定（まだ更新されうる）ため、Cron では**前日以前を確定値、当日は暫定値**として扱う。
-
-更新は定期処理（Cron Triggers）または管理APIで行い、管理APIは §9.4 と同じ運用者認証（GitHub セッション）を必須とする。
+セッション要約（`session_summaries`）の更新ルール・冪等性・page_path の扱いと、日次集計（`daily_event_counts` / `daily_session_metrics`）の集計キー・指標・日付帰属は、データストア仕様にまとめている。[`db-spec.ja.md`](./db-spec.ja.md) の「セッション要約」「日次集計」を参照。
 
 ---
 
@@ -1079,7 +667,6 @@ page_path
 message
 fingerprint
 occurred_at
-count
 ```
 
 通知本文に以下を含めてはならない。
@@ -1193,7 +780,9 @@ Access-Control-Allow-Origin: <許可された Origin>
 Vary: Origin
 ```
 
-プリフライト（`OPTIONS`）には `Access-Control-Allow-Methods: POST` / `Access-Control-Allow-Headers: content-type` を返す。
+プリフライト（`OPTIONS`）には `Access-Control-Allow-Methods: POST` / `Access-Control-Allow-Headers: content-type` を返す。プリフライト結果のキャッシュのため `Access-Control-Max-Age` を付してよい。
+
+収集系エンドポイント（`/events` / `/events/batch` / `/errors`）は `POST` のみを受け付け、それ以外のメソッドには `405 Method Not Allowed`（`Allow: POST`）を返す。
 
 ### 15.2 sendBeacon と Content-Type
 
@@ -1270,7 +859,7 @@ per-request 防御だけでは、暴走したクライアント1つが共有 D1/
 
 #### ユーザーへの影響
 
-`429` はユーザーに不可視である（§22.1）。`fetch` は 4xx で reject せず console にも出ない。SDK が応答を握りつぶし、§17.6 に従いリトライしない限り、組み込み先アプリの動作には一切影響しない。  
+`429` はユーザーに不可視である（§22.1）。`fetch` は 4xx で reject せず console にも出ない。SDK が応答を握りつぶし、[`sdk-spec.ja.md`](./sdk-spec.ja.md) の「バックオフ（429 の扱い）」に従いリトライしない限り、組み込み先アプリの動作には一切影響しない。  
 「静かに無視」とは**ユーザーに見せないこと**を指し、HTTP ステータスを 202 に固定することではない。
 
 ### 16.4 逼迫アラート（超えそうになったら通知）
@@ -1288,7 +877,7 @@ limit: events_per_day
 current: 168,000 / 200,000 (84%)
 ```
 
-容量逼迫の評価は、Cron Triggers（§19.3）の retention 処理と同じ定期実行に相乗りしてよい。
+容量逼迫の評価は、Cron Triggers（[`db-spec.ja.md`](./db-spec.ja.md) の「Retention > 実行方法」）の retention 処理と同じ定期実行に相乗りしてよい。
 
 ### 16.5 将来的な追加（任意）
 
@@ -1298,100 +887,6 @@ bot user-agentの除外
 app_id単位の自動スロットリング（上限到達で一定時間受付停止）
 ```
 
----
-
-## 17. Frontend SDK
-
-### 17.1 基本方針
-
-フロントエンドでは、自由文字列でイベントを送らない。
-
-以下を提供する。
-
-```text
-track()
-trackBatch()
-trackPageView()
-trackClick()
-trackError()
-```
-
-アプリ固有イベントについては、型付きラッパーを作る。
-
-```text
-analytics.choiceSelected()
-analytics.recommendationShown()
-analytics.recommendationAccepted()
-```
-
-### 17.2 セッションID
-
-`session_id` はページロード時に生成する。
-
-```text
-session_id = crypto.randomUUID()
-```
-
-ブラウザタブ単位の一時セッションとして扱う。
-
-### 17.3 distinct_id
-
-初期実装では、長期的な `distinct_id` は必須としない。
-
-長期的なユーザー追跡を避けるため、原則として `session_id` のみで分析する。
-
-必要な場合でも、アプリ側で明示的に有効化する。
-
-### 17.4 送信方法
-
-通常イベントは `fetch` または `sendBeacon` で送信する。
-
-離脱時の送信には `navigator.sendBeacon` を優先する。
-
-beacon ではプリフライトを避けるため、`Content-Type` を `text/plain` とした単純リクエストで送る（§15.2）。Worker 側は Content-Type に依存せず body を JSON として parse する。
-
-```ts
-navigator.sendBeacon(
-  endpoint,
-  new Blob([JSON.stringify(payload)], { type: "text/plain" })
-);
-```
-
-通常の `fetch` 送信では `Content-Type: application/json` を用いてよい（この場合はプリフライトが発生するため §15.1 のヘッダを返す）。
-
-### 17.5 バッチ送信
-
-クリックやフローイベントは、必要に応じてバッチ送信する。
-
-```text
-max events per batch: 20
-flush interval: 5 seconds
-flush on visibilitychange
-flush on pagehide
-```
-
-エラーイベントは即時送信する。
-
-### 17.6 バックオフ（429 の扱い）
-
-SDK は、サーバの容量上限（§16）に協調して送信を止める責務を持つ。これが Worker 呼び出しまで含めた基盤保護に効く。
-
-ルールは以下とする。
-
-- **非2xx でリトライしない**。特に `429` / `4xx` を受けたイベントは**破棄**する。リトライはリトライストームを招き、ポリシー（§1）に反する。
-- `429` を受けたら、`Retry-After` で示された期間（ヘッダが無ければ既定 60 秒）は**新規イベントの送信を停止**する。停止中に発生したイベントはキューに無限堆積させず、上限を超えたぶんは捨てる。
-- 停止期間が明けたら通常送信に戻る。指数バックオフは任意。
-- `sendBeacon` は応答を読めないため、バックオフ判定は `fetch` 経路でのみ行う。直近に `fetch` で `429` を受けている間は、beacon 送信も控えてよい。
-- いずれの失敗もユーザーに表示しない（§22.1）。`fetch` の失敗（ネットワーク断・CORS）も同様に握りつぶす。
-
-```ts
-// 概念例
-if (res.status === 429) {
-  const sec = Number(res.headers.get("Retry-After")) || 60;
-  pauseUntil = now + sec * 1000;   // この間は送信停止・対象イベントは破棄
-  return;                          // リトライしない
-}
-```
 
 ---
 
@@ -1402,17 +897,23 @@ if (res.status === 429) {
 ポリシー §1（運用手間の最小化）に照らし、ダッシュボードの提供範囲を以下に定める。
 
 - **本システムが提供するもの**:
-    - 集計値を返す `GET /metrics`（§9.4）。
-    - それを表示する**最小の読み取り専用ダッシュボード**（静的 HTML + `fetch` の薄いクライアント）。運用者が UI を自前で構築しなくても、導入直後に主要指標を確認できることを目標とする。
+    - **最小の読み取り専用ダッシュボード** `GET /dashboard`。運用者が UI を自前で構築しなくても、導入直後に主要指標を確認できることを目標とする。
+    - 集計値は Worker がサーバ側で計算し（`daily_*` テーブルおよび保存期間内の `raw_events` から）、ダッシュボードの HTML に埋め込んで返す（サーバーサイドレンダリング）。SVG の時系列グラフのみ、埋め込み済みデータをクライアントの軽量スクリプトが描画する（時刻のローカルTZ整形のため）。
+    - 集計値を返す独立した HTTP API（旧 `GET /metrics`）は提供しない。集計ロジックはダッシュボード専用の内部関数として実装する。
 - **スコープ外（運用者側の任意実装）**:
-    - リッチな BI/可視化、フィルタ UI、ダッシュボードの認証基盤統合、複数アプリの一覧管理画面。
-    - これらは `GET /metrics` を叩く外部ツール（スプレッドシート連携・Grafana 等）で代替できることを前提とし、本システムは API の安定提供に責任を持つ。
+    - リッチな BI/可視化、フィルタ UI、ダッシュボードの認証基盤統合。
+    - これらが必要な場合は、R2 への月次 export で書き出したデータを外部ツール（スプレッドシート連携・Grafana 等）に取り込んで構築することを前提とする。
 
-同梱ダッシュボードも §9.4 の認証（GitHub ログインのセッション Cookie）を用いる。
+ダッシュボードの認証は GitHub ログインのセッション Cookie を用いる。OAuth secret 群が未設定の場合、本番では設定不足の案内ページを表示し、ローカル開発（`APP_ENV=development`）のときのみ認証をバイパスする。
+
+### 18.1.1 画面構成
+
+- **一覧ビュー**（`GET /dashboard`）: 設定済みアプリ（`app_id`）の一覧を表示し、各アプリの詳細へリンクする。
+- **詳細ビュー**（`GET /dashboard?app=<app_id>&from=<YYYY-MM-DD>&to=<YYYY-MM-DD>`）: 指定アプリのサマリー指標と時系列グラフを表示する。期間は GET フォームで指定し、サーバが再レンダリングする（クライアント側の XHR/fetch は用いない）。`app` が未指定・未知の場合は一覧ビューにフォールバックする。
 
 ### 18.2 表示項目
 
-初期ダッシュボードでは、以下を表示する。
+初期ダッシュボードの詳細ビューでは、サマリーカードとして以下を表示する。
 
 ```text
 page views
@@ -1421,15 +922,27 @@ sessions
 started sessions
 completed sessions
 accepted sessions
-rejected sessions
-restarted sessions
-errors
+errored sessions
+error events
 completion rate
 acceptance rate
 error rate
 ```
 
+`error events` は `error_occurred` と `api_failed` のイベント件数の合計、`errored sessions` はエラーが発生したセッション数である。
+
+加えて、時系列グラフを 2 種類表示する（系列は `page_views` / `clicks` / `errors`）。
+
+```text
+過去24時間（5分粒度・時刻はローカルTZ）
+過去30日（日別）
+```
+
+`rejected_sessions` / `restarted_sessions` は `daily_session_metrics` に集計しているが、現状の同梱ダッシュボードでは表示していない（§18.3 の `restart_rate` も同様）。
+
 ### 18.3 指標定義
+
+同梱ダッシュボードが算出・表示する比率は以下とする。
 
 ```text
 completion_rate =
@@ -1438,18 +951,17 @@ completion_rate =
 acceptance_rate =
   accepted_sessions / completed_sessions
 
-restart_rate =
-  restarted_sessions / completed_sessions
-
 error_rate =
   errored_sessions / sessions
 ```
 
-分母が0の場合は `null` とする。
+分母が0の場合は `null` とする（UI 上は `—` と表示）。
 
-### 18.4 ウィジェット向け指標
+`restart_rate = restarted_sessions / completed_sessions` も同じ要領で算出可能だが、現状の同梱ダッシュボードでは表示していない（将来の追加候補）。
 
-固定選択肢型ウィジェットでは以下も表示する。
+### 18.4 ウィジェット向け指標（将来の追加候補・現状未実装）
+
+固定選択肢型ウィジェットでは、将来的に以下も表示する余地を残す。**現状の同梱ダッシュボードでは未提供**だが、いずれも `daily_event_counts`（集計キーに `widget_id` / `flow_version` / `step` / `choice_id` / `result_id` を含む）および保存期間内の `raw_events` から算出可能である。
 
 ```text
 choice_id別選択回数
@@ -1463,201 +975,6 @@ flow_version別完了率
 `step別到達数` は `step_viewed` の step 別カウント（到達したセッション数の近似）から求める。  
 `step別離脱推定` は「step N に到達したが N+1 に到達しなかった」割合として算出する。ただしフローが step を飛ばす／戻る設計の場合は単純な差分では正確にならないため、**到達は `MAX(step)` ベース（その step 以上に到達したセッション数）**で扱い、推定値である旨を明示する。
 
----
-
-## 19. Retention
-
-### 19.1 初期設定
-
-| Table | Retention |
-|---|---:|
-| `raw_events` | 30 days |
-| `error_events` | 90 days |
-| `session_summaries` | 365 days |
-| `daily_event_counts` | indefinite |
-| `daily_session_metrics` | indefinite |
-| `notification_dedupes` | 30 days after last notification |
-
-### 19.2 削除SQL例
-
-```sql
-DELETE FROM raw_events
-WHERE occurred_at < datetime('now', '-30 days');
-
-DELETE FROM error_events
-WHERE occurred_at < datetime('now', '-90 days');
-
-DELETE FROM session_summaries
-WHERE started_at < datetime('now', '-365 days');
-
-DELETE FROM notification_dedupes
-WHERE last_notified_at < datetime('now', '-30 days');
-```
-
-### 19.3 実行方法
-
-retention 処理は **Cloudflare Workers Cron Triggers による完全自動実行を既定**とする（ポリシー §1「運用する側の手間がかからない／自動化されていること」）。  
-手動管理 API・CI/CD からの実行は、再実行や障害復旧用の**補助手段**と位置づけ、通常運用では人手を必要としない。
-
-### 19.4 定期処理一覧
-
-運用に必要な定期処理は、すべて Cron Triggers に集約し、人手の介入なしに回るようにする。
-
-| 処理 | 既定スケジュール | 内容 | 参照 |
-|---|---|---|---|
-| retention | 日次 | 期限切れ行の削除（§19.2） | §19 |
-| daily_session_metrics 再計算 | 日次 | 前日確定分の集計を冪等に再生成 | §12.2 |
-| 容量チェック / 逼迫アラート | 毎時 | 総量・D1 サイズを評価し警戒閾値超過で通知 | §16.4 |
-| 月次 export（Phase 4） | 月次 | R2 への自動 export | §20 |
-
-各処理は冪等に設計し（再実行で二重処理が起きない）、失敗時は次回スケジュールで自然に回復できるようにする。  
-処理の成否・削除件数・ドロップ件数等は Worker のログに記録する。手動確認を前提とした運用手順書を必要としないことを目標とする。
-
----
-
-## 20. Export
-
-### 20.1 基本方針
-
-手動 export は **Phase 1〜3 の暫定手段**と位置づける。手動 export を恒常的な運用フローに組み込まない。
-
-ポリシー §1（運用手間の最小化）に照らした到達点は、**月次の R2 自動 export（Cron Triggers）**である（§19.4）。Phase 4 でこれを実装し、手動 export は障害復旧・スポット調査用の補助に格下げする。
-
-| 段階 | export 方式 | 位置づけ |
-|---|---|---|
-| Phase 1〜3 | 手動（管理 API 経由） | 暫定。必要時のみ |
-| Phase 4 以降 | 月次 R2 自動 export | 標準。人手不要 |
-
-### 20.2 Export対象
-
-優先度順に以下をexport可能にする。
-
-```text
-daily_event_counts
-daily_session_metrics
-session_summaries
-error_events
-raw_events
-```
-
-`raw_events` は短期保存であるため、必要な場合のみexportする。
-
-### 20.3 Export形式
-
-推奨形式は以下とする。
-
-```text
-daily_event_counts: CSV
-daily_session_metrics: CSV
-session_summaries: JSONL or CSV
-error_events: JSONL
-raw_events: JSONL
-```
-
-### 20.4 R2保存パス案
-
-```text
-analytics-exports/
-  app_id/
-    daily_event_counts/
-      2026/
-        06.csv
-    daily_session_metrics/
-      2026/
-        06.csv
-    session_summaries/
-      2026/
-        06.jsonl.gz
-    error_events/
-      2026/
-        06.jsonl.gz
-    raw_events/
-      2026/
-        06/
-          01.jsonl.gz
-```
-
-### 20.5 再export時の冪等性
-
-月途中の再export・再実行に備え、export は**同一パスを上書き（PUT で置換）**する冪等な操作とする。追記はしない。  
-`daily_event_counts` / `daily_session_metrics` のように後から再生成されうる集計値は、export 時点のスナップショットとして月ファイルをまるごと再生成して置き換える。  
-これにより、同じ期間を複数回 export しても二重計上が起きない。
-
----
-
-## 21. 実装フェーズ
-
-### Phase 1: 最小収集
-
-実装対象:
-
-```text
-POST /events
-POST /errors
-raw_events
-error_events
-error notification
-basic frontend SDK
-```
-
-目的:
-
-```text
-まずイベントとエラーを受け取れるようにする。
-```
-
-### Phase 2: 集計
-
-実装対象:
-
-```text
-daily_event_counts
-session_summaries
-basic metrics API
-simple dashboard
-```
-
-目的:
-
-```text
-PV、クリック、完了率、採用率、エラー率を見られるようにする。
-```
-
-### Phase 3: 運用
-
-実装対象:
-
-```text
-retention
-notification dedupe
-manual export
-Cron Triggers
-```
-
-目的:
-
-```text
-継続運用できる状態にする。
-```
-
-### Phase 4: 拡張
-
-実装候補:
-
-```text
-R2 export
-flow_version comparison
-step drop-off report
-result acceptance report
-API latency metrics
-bot filtering
-```
-
-目的:
-
-```text
-小規模プロダクト分析基盤として育てる。
-```
 
 ---
 
@@ -1710,69 +1027,39 @@ raw_eventsと集計テーブルを分ける
 export可能な形式にする
 ```
 
-将来的な移行先候補:
-
-```text
-Neon Postgres
-Supabase Postgres
-ClickHouse
-Tinybird
-BigQuery
-```
-
 ---
 
-## 24. 初期設定例
+## 24. 静的設定
 
-### 24.1 App config
+アプリ単位の設定は、データベースではなく Worker の環境（wrangler の vars / secrets）に静的に持つ。運用者が設定を変えるのは稀であり、起動時に読み込む静的設定で十分なためである（ポリシー §1）。
 
-```json
-{
-  "app_id": "product_recommender",
-  "allowed_origins": [
-    "https://example.com",
-    "https://www.example.com"
-  ],
-  "require_origin": true,
-  "retention": {
-    "raw_events_days": 30,
-    "error_events_days": 90,
-    "session_summaries_days": 365
-  },
-  "limits": {
-    "events_per_minute": 600,
-    "events_per_day": 200000,
-    "raw_events_rows": 1000000,
-    "warn_threshold_ratio": 0.8
-  },
-  "notification": {
-    "enabled": true,
-    "dedupe_minutes": 10,
-    "capacity_dedupe_minutes": 60
-  }
-}
-```
+### 24.1 アプリ設定（vars）
 
-`/metrics` および管理API（§9.4 / §12.2 / §19.3）は運用者の GitHub ログイン（セッション Cookie）で認証する。  
-`require_origin` は `Origin` ヘッダ欠如時の扱いを切り替える（§15.3）。  
-`limits` は総量上限（§16.2）、`warn_threshold_ratio` は逼迫アラートの警戒閾値（§16.4）、`capacity_dedupe_minutes` は逼迫アラートの抑制間隔（§13.3）である。
-
-### 24.2 初期イベントセット
+`APP_CONFIG` に `app_id` ごとの設定をまとめて持つ。各アプリは以下を持つ。
 
 ```text
-page_view
-click
-widget_opened
-flow_started
-step_viewed
-choice_selected
-recommendation_shown
-recommendation_accepted
-recommendation_rejected
-flow_restarted
-error_occurred
-api_failed
+allowed_origins      許可 Origin の配列（§15）
+require_origin       Origin 欠如時に拒否するか（§15.3）
+limits               総量上限（events_per_minute / events_per_day /
+                     raw_events_rows / warn_threshold_ratio。§16.2）
+retention            保存日数（raw_events / error_events / session_summaries。db-spec「Retention」）
+notification         通知設定（有効可否・dedupe 分数・容量 dedupe 分数。§13.3）
 ```
+
+実行環境は `APP_ENV`（`production` / `preview` / `development`）で指定する。`development` はローカル開発用で、OAuth 未設定時の認証バイパスを有効にする（§18.1）。
+
+### 24.2 秘匿値（secrets）
+
+秘匿値は vars と分離し、`wrangler secret put` で投入する。
+
+```text
+NOTIFY_WEBHOOK_URL                            通知先 webhook（§13.4）
+IP_HASH_SECRET                                ip_hash 生成用 salt（§14.3。未設定なら ip_hash を記録しない）
+GITHUB_CLIENT_ID / GITHUB_CLIENT_SECRET /
+SESSION_SECRET / ALLOWED_GITHUB_USERS         ダッシュボードの GitHub ログイン（§18.1）
+```
+
+具体的な設定値・記述例は `wrangler.toml` を参照する（本仕様では構造のみを定義する）。
 
 ---
 
@@ -1817,7 +1104,7 @@ stack
 
 - 受信時に `received_at` を必ず記録する。
 - `occurred_at` が `received_at` を基準とした許容範囲（例: 過去 +7 日 〜 未来 +1 時間）を外れる場合は、`received_at` で置き換える。
-- 日次集計（§12）・セッション帰属（§12.2）の `day` は、この**正規化後の値**を UTC 日付に丸めて用いる。
+- 日次集計・セッション帰属（[`db-spec.ja.md`](./db-spec.ja.md) の「日次集計」）の `day` は、この**正規化後の値**を UTC 日付に丸めて用いる。
 
 ### 25.7 D1 への書き込み戦略
 
@@ -1865,6 +1152,9 @@ retentionによりDB肥大化を抑えられる
 | daily_event_counts | 日次イベント集計 |
 | daily_session_metrics | 日次セッション集計 |
 | error_events | エラー詳細ログ |
+| notification_dedupes | 通知の連打抑制用テーブル（§13.3 / §16.4） |
+| fingerprint | エラーをグルーピングする識別子（抑制判定はサーバ生成値を使う。§13.2） |
+| ip_hash | 日替わり salt 付き IP ハッシュ（raw IP は保存しない。§14.3） |
 
 ---
 

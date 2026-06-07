@@ -3,27 +3,29 @@
 English | [日本語](./README.ja.md)
 
 A lightweight analytics / error notification backend for small frontends (Cloudflare Workers + D1).
-See the specification in [docs/spec.md](./docs/spec.md).
+The spec is split into three files; start from the core [docs/spec.ja.md](./docs/spec.ja.md).
 
 ## Layout
 
 ```
-docs/spec.md   Specification (policy, data model, API, operations)
-worker/        Collection Worker (Hono + D1 + KV + R2)
-sdk/           Frontend SDK (zero-dependency, TypeScript)
+docs/spec.ja.md       Core spec (policy, event model, API, validation, notification, privacy, CORS, limits, dashboard)
+docs/sdk-spec.ja.md   Frontend SDK spec
+docs/db-spec.ja.md    Data store spec (D1 schema, session/daily aggregation, retention, export)
+worker/               Collection Worker (Hono + D1 + KV + R2)
+sdk/                  Frontend SDK (zero-dependency, TypeScript)
 ```
 
 ## Worker
 
-- Endpoints: `POST /events` `/events/batch` `/errors`, `GET /metrics`, `GET /dashboard`, `POST /admin/export`
+- Endpoints: `POST /events` `/events/batch` `/errors`, `GET /dashboard`, `POST /admin/export`
 - One request = one transaction, writing raw_events / daily_event_counts / session_summaries (§25.7)
 - On exceeding volume limits: fetch → 429 + Retry-After, beacon → silently dropped (§16)
-- Cron: daily retention + session aggregation, hourly capacity checks, monthly R2 export (§19.4)
+- Cron: daily retention + session aggregation, hourly capacity checks, monthly R2 export (docs/db-spec.ja.md)
 
 ```bash
 cd worker
 pnpm install
-pnpm test                                  # 27 tests
+pnpm test                                  # 41 tests
 pnpm exec wrangler d1 migrations apply frontping --local
 pnpm exec wrangler dev                     # run locally
 ```
@@ -34,7 +36,7 @@ For deployment, see [worker/DEPLOY.md](./worker/DEPLOY.md).
 
 ```bash
 cd sdk
-pnpm install && pnpm test                  # 11 tests
+pnpm install && pnpm test                  # 14 tests
 pnpm run build                             # outputs to dist/
 ```
 
@@ -79,12 +81,13 @@ analytics.track("coffee_purchased", { sku: "drip_01", price: 1200 }); // name & 
 analytics.track("page_view"); // standard events still available
 ```
 
-- `session_id` is generated automatically per tab (§17.2)
-- Events are batched (every 5s / 20 events) and flushed via sendBeacon on page exit (§17.4 / §17.5)
-- On a 429, sending pauses for the Retry-After window and events are dropped (no retry, §17.6)
+- `session_id` is generated automatically per tab
+- Events are batched (every 5s / 20 events) and flushed via sendBeacon on page exit
+- On a 429, sending pauses for the Retry-After window and events are dropped (no retry)
 - Send failures are never surfaced to the user (§22.1)
+
+See [docs/sdk-spec.ja.md](./docs/sdk-spec.ja.md) for SDK details.
 
 ## Dashboard
 
-Open `GET /dashboard`, enter an app_id and metrics token to view the key metrics (§18.1).
-It is read-only and calls `/metrics` from the same origin.
+Open `GET /dashboard` (GitHub login required in production; bypassed in local dev). Pick an app from the list to view its key metrics and time-series charts. It is read-only and server-rendered — metrics are computed on the server and embedded in the HTML, so there is no public metrics API (§18.1).

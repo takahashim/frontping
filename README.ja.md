@@ -3,27 +3,29 @@
 [English](./README.md) | 日本語
 
 小規模フロントエンド向けの軽量解析/エラー通知基盤（Cloudflare Workers + D1）です。
-仕様は [docs/spec.md](./docs/spec.md) を参照してください。
+仕様は3ファイルに分割しています。まずコアの [docs/spec.ja.md](./docs/spec.ja.md) から参照してください。
 
 ## 構成
 
 ```
-worker/        収集 Worker（Hono + D1 + KV + R2）
-sdk/           フロントエンド SDK（依存ゼロ・TypeScript）
-docs/spec.md   仕様書（ポリシー・データモデル・API・運用方針）
+docs/spec.ja.md       コア仕様（ポリシー・イベントモデル・API・バリデーション・通知・プライバシー・CORS・上限・ダッシュボード）
+docs/sdk-spec.ja.md   フロントエンド SDK 仕様
+docs/db-spec.ja.md    データストア仕様（D1スキーマ・セッション/日次集計・retention・export）
+worker/               収集 Worker（Hono + D1 + KV + R2）
+sdk/                  フロントエンド SDK（依存ゼロ・TypeScript）
 ```
 
 ## Worker
 
-- エンドポイント: `POST /events` `/events/batch` `/errors`, `GET /metrics`, `GET /dashboard`, `POST /admin/export`
+- エンドポイント: `POST /events` `/events/batch` `/errors`, `GET /dashboard`, `POST /admin/export`
 - 1リクエスト=1トランザクションで raw_events / daily_event_counts / session_summaries を書き込み（§25.7）
 - 総量上限超過は fetch=429+Retry-After / beacon=静かにドロップ（§16）
-- Cron: 日次 retention + セッション集計、毎時 容量チェック、月次 R2 export（§19.4）
+- Cron: 日次 retention + セッション集計、毎時 容量チェック、月次 R2 export（docs/db-spec.ja.md）
 
 ```bash
 cd worker
 pnpm install
-pnpm test                                  # 27 tests
+pnpm test                                  # 41 tests
 pnpm exec wrangler d1 migrations apply frontping --local
 pnpm exec wrangler dev                     # ローカル起動
 ```
@@ -34,7 +36,7 @@ pnpm exec wrangler dev                     # ローカル起動
 
 ```bash
 cd sdk
-pnpm install && pnpm test                  # 11 tests
+pnpm install && pnpm test                  # 14 tests
 pnpm run build                             # dist/ に出力
 ```
 
@@ -79,12 +81,13 @@ analytics.track("coffee_purchased", { sku: "drip_01", price: 1200 }); // 名前�
 analytics.track("page_view"); // 標準イベントも引き続き使える
 ```
 
-- session_id はタブ単位で自動生成（§17.2）
-- イベントは5秒間隔／20件でバッチ送信、離脱時は sendBeacon（§17.4/§17.5）
-- 429 を受けたら Retry-After の間は送信停止しイベントを破棄（リトライしない, §17.6）
+- session_id はタブ単位で自動生成
+- イベントは5秒間隔／20件でバッチ送信、離脱時は sendBeacon
+- 429 を受けたら Retry-After の間は送信停止しイベントを破棄（リトライしない）
 - 送信失敗はユーザーに見せない（§22.1）
+
+SDK の詳細は [docs/sdk-spec.ja.md](./docs/sdk-spec.ja.md) を参照。
 
 ## ダッシュボード
 
-`GET /dashboard` を開き、app_id と metrics token を入力すると主要指標を表示（§18.1）。
-読み取り専用・同一オリジンで `/metrics` を呼ぶ。
+`GET /dashboard` を開く（本番は GitHub ログイン必須、ローカル開発はバイパス）。一覧からアプリを選ぶと主要指標と時系列グラフを表示する。読み取り専用かつサーバーサイドレンダリングで、集計値はサーバ側で計算して HTML に埋め込む（公開メトリクス API は持たない。§18.1）。
